@@ -1,11 +1,15 @@
-from flask import Flask, request, render_template_string
+from flask import Flask, request, redirect, url_for, render_template_string, jsonify 
 import pandas as pd
 import os
 import qrcode
 from io import BytesIO
+from werkzeug.utils import secure_filename
 
 app = Flask(__name__)
 app.config['UPLOAD_FOLDER'] = 'uploads'
+
+# Lista de extensões permitidas
+ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif'}
 
 # Cria os diretórios necessários se não existirem
 if not os.path.exists('static/qr_codes'):
@@ -14,6 +18,11 @@ if not os.path.exists('static/fotos'):
     os.makedirs('static/fotos')
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
+
+def allowed_file(filename):
+    # Retorna True se a extensão do arquivo for permitida
+    _, ext = os.path.splitext(filename)
+    return ext.lower() in ALLOWED_EXTENSIONS
 
 def gerar_html_carteirinhas(arquivo_excel):
     # Lê o Excel enviado (arquivo_excel é um objeto file-like)
@@ -140,6 +149,7 @@ def gerar_html_carteirinhas(arquivo_excel):
       margin-left: auto;
       margin-right: auto;
       border: 4px solid #2196F3;
+      cursor: pointer;
     }
     .info {
       display: flex;
@@ -249,7 +259,7 @@ def gerar_html_carteirinhas(arquivo_excel):
       }
       .carteirinha {
         width: 250px;
-        height: 450px !important;
+        height: 455px !important;
         page-break-inside: avoid;
         padding-top: 5px;
       }
@@ -312,6 +322,12 @@ def gerar_html_carteirinhas(arquivo_excel):
         margin-bottom: 40px;
       }
     }
+    /* Nova regra para hover na div de upload inline */
+    .foto.uploadable:hover {
+      transform: scale(1.05);
+      transition: all 0.3s ease;
+      cursor: pointer;
+    }
   </style>
   <!-- Google Fonts -->
   <link href="https://fonts.googleapis.com/css?family=Roboto:400,500,700&display=swap" rel="stylesheet">
@@ -328,7 +344,7 @@ def gerar_html_carteirinhas(arquivo_excel):
     html_content += '<div class="page"><div class="page-number">Página ' + str(num_pagina) + '</div>'
     html_content += '<button class="imprimir-pagina" onclick="imprimirPagina(this)">Imprimir Página</button>'
     html_content += '<div class="cards-grid">'
-    
+
     def gerar_qr_code(rm):
         caminho_qr = f'static/qr_codes/{rm}.png'
         qr = qrcode.make(f"RM: {rm} - Se possível, contribua com a APM")
@@ -337,6 +353,10 @@ def gerar_html_carteirinhas(arquivo_excel):
     
     for _, row in dados.iterrows():
         rm = str(row['RM'])
+        # Ignora registros com RM "0"
+        if rm == '0':
+            continue
+        
         nome = row['NOME']
         data_nasc = row['DATA NASC.']
         serie = row['SÉRIE']
@@ -364,12 +384,32 @@ def gerar_html_carteirinhas(arquivo_excel):
         else:
             classe_cor = 'vermelho'
             status_texto = "Não Sai Sozinho"
-    
-        caminho_foto = f'static/fotos/{rm}.jpg'
-        if os.path.exists(caminho_foto):
-            foto_tag = f'<img src="/static/fotos/{rm}.jpg" alt="Foto" class="foto">'
+        
+        # Verifica se há foto com uma das extensões permitidas
+        allowed_exts = ['.jpg', '.jpeg', '.png', '.bmp', '.gif']
+        found_photo = None
+        for ext in allowed_exts:
+            caminho_foto = f'static/fotos/{rm}{ext}'
+            if os.path.exists(caminho_foto):
+                found_photo = f"/static/fotos/{rm}{ext}"
+                break
+        
+        # Campo da foto passa a ser clicável para inline upload:
+        if found_photo:
+            foto_tag = f'<img src="{found_photo}" alt="Foto" class="foto uploadable" data-rm="{rm}">'
         else:
-            foto_tag = '<div class="foto"></div>'
+            # Se não houver foto, mostra ícone de câmera e o texto "Anexe uma foto"
+            # Agora com opacidade reduzida e cor cinza
+            foto_tag = f'''
+            <div class="foto uploadable" data-rm="{rm}" style="display:flex; flex-direction:column; align-items:center; justify-content:center;">
+              <span style="font-size:40px; opacity:0.5; color: grey;">&#128247;</span>
+              <small style="font-size:12px; opacity:0.5; color: grey;">Anexe uma foto</small>
+            </div>
+            '''
+        
+        # Campo hidden para upload inline:
+        hidden_input = f'<input type="file" class="inline-upload" data-rm="{rm}" style="display:none;" accept="image/*">'
+            
         qr_tag = f'<img src="{qr_url}" alt="QR Code">'
     
         html_content += f"""
@@ -377,6 +417,7 @@ def gerar_html_carteirinhas(arquivo_excel):
         <div class="carteirinha">
           <div class="escola">E.M José Padin Mouta</div>
           {foto_tag}
+          {hidden_input}
           <div class="info">
             <div class="linha-nome">
               <span class="titulo">Nome:</span>
@@ -419,6 +460,7 @@ def gerar_html_carteirinhas(arquivo_excel):
     if contador % 4 != 0:
         html_content += '</div></div>'  # Fecha a última grid e a última página
     
+    # Script para impressão, busca e inline upload de fotos
     html_content += """
   </div>
 <script>
@@ -455,6 +497,60 @@ def gerar_html_carteirinhas(arquivo_excel):
       }
     });
   });
+  
+  // Função para upload inline da foto ao clicar no campo da foto
+  document.addEventListener('DOMContentLoaded', function() {
+    // Ao clicar na área clicável da foto
+    document.querySelectorAll('.uploadable').forEach(function(element) {
+      element.addEventListener('click', function() {
+        var rm = element.getAttribute('data-rm');
+        var input = document.querySelector('.inline-upload[data-rm="'+rm+'"]');
+        if(input) {
+          input.click();
+        }
+      });
+    });
+    
+    // Quando o arquivo é selecionado, faz o upload via AJAX
+    document.querySelectorAll('.inline-upload').forEach(function(input) {
+      input.addEventListener('change', function() {
+        var file = input.files[0];
+        if(file) {
+          var rm = input.getAttribute('data-rm');
+          var formData = new FormData();
+          formData.append('rm', rm);
+          formData.append('foto_file', file);
+          
+          fetch('/upload_inline_foto', {
+            method: 'POST',
+            body: formData
+          })
+          .then(response => response.json())
+          .then(data => {
+            if(data.url) {
+              var uploadable = document.querySelector('.uploadable[data-rm="'+rm+'"]');
+              if(uploadable.tagName.toLowerCase() === 'img') {
+                uploadable.src = data.url;
+              } else {
+                var img = document.createElement('img');
+                img.src = data.url;
+                img.alt = "Foto";
+                img.className = "foto uploadable";
+                img.setAttribute('data-rm', rm);
+                uploadable.parentNode.replaceChild(img, uploadable);
+              }
+            } else {
+              alert("Erro ao fazer upload: " + (data.error || "Erro desconhecido"));
+            }
+          })
+          .catch(error => {
+            console.error('Erro:', error);
+            alert("Erro no upload da foto.");
+          });
+        }
+      });
+    });
+  });
 </script>
 </body>
 </html>
@@ -463,20 +559,20 @@ def gerar_html_carteirinhas(arquivo_excel):
 
 @app.route('/', methods=['GET', 'POST'])
 def index():
+    # Página inicial com formulários para upload do Excel, upload de foto única, múltiplas fotos e upload inline na carteirinha
     if request.method == 'POST':
-        if 'excel_file' not in request.files:
-            return "Nenhum arquivo enviado", 400
-        file = request.files['excel_file']
-        if file.filename == '':
-            return "Nenhum arquivo selecionado", 400
-        html_result = gerar_html_carteirinhas(file)
-        return html_result
+        if 'excel_file' in request.files:
+            file = request.files['excel_file']
+            if file.filename == '':
+                return "Nenhum arquivo selecionado", 400
+            html_result = gerar_html_carteirinhas(file)
+            return html_result
     return '''
     <!doctype html>
     <html lang="pt-br">
       <head>
         <meta charset="utf-8">
-        <title>Upload do Excel para Carteirinhas</title>
+        <title>Upload para Carteirinhas</title>
         <!-- Bootstrap CSS -->
         <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
         <!-- Google Fonts -->
@@ -508,6 +604,17 @@ def index():
             bottom: 0;
             width: 100%;
           }
+          /* Estilos para o formulário de múltiplas fotos */
+          #multi-upload-section {
+            margin-top: 20px;
+            border: 1px solid #ccc;
+            padding: 20px;
+            border-radius: 8px;
+            background-color: #f9f9f9;
+          }
+          .multi-upload-group {
+            margin-bottom: 15px;
+          }
         </style>
       </head>
       <body>
@@ -515,14 +622,45 @@ def index():
           <h1 class="mb-0">Carteirinhas - E.M José Padin Mouta</h1>
         </header>
         <div class="container container-upload">
-          <h2 class="mb-4">Envie o arquivo Excel</h2>
-          <p class="mb-4">Selecione o arquivo: <strong>LISTA PILOTO - REGULAR - 2025 PREVIA.xlsx</strong></p>
+          <h2 class="mb-4">Envie a lista piloto (Excel)</h2>
           <form method="POST" enctype="multipart/form-data">
             <div class="form-group">
               <input type="file" class="form-control-file" name="excel_file" accept=".xlsx, .xls">
             </div>
             <button type="submit" class="btn btn-primary">Gerar Carteirinhas</button>
           </form>
+          <hr>
+          <h2 class="mb-4">Upload da Foto</h2>
+          <form method="POST" action="/upload_foto" enctype="multipart/form-data">
+            <div class="form-group">
+              <label>RM do Aluno:</label>
+              <input type="text" class="form-control" name="rm" placeholder="Digite o RM">
+            </div>
+            <div class="form-group">
+              <input type="file" class="form-control-file" name="foto_file" accept="image/*">
+            </div>
+            <button type="submit" class="btn btn-secondary">Enviar Foto</button>
+          </form>
+          <hr>
+          <h2 class="mb-4">Upload de Múltiplas Fotos</h2>
+          <button type="button" class="btn btn-secondary" id="show-multi-upload">Enviar múltiplas fotos</button>
+          <div id="multi-upload-section" style="display: none;">
+            <form method="POST" action="/upload_multiplas_fotos" enctype="multipart/form-data" id="multi-upload-form">
+              <div id="multi-upload-fields">
+                <div class="multi-upload-group">
+                  <div class="form-group">
+                    <label>RM do Aluno:</label>
+                    <input type="text" class="form-control" name="rm[]" placeholder="Digite o RM">
+                  </div>
+                  <div class="form-group">
+                    <input type="file" class="form-control-file" name="foto_file[]" accept="image/*">
+                  </div>
+                </div>
+              </div>
+              <button type="button" class="btn btn-info" id="add-more" style="margin-top:10px;">Adicionar outra foto</button>
+              <button type="submit" class="btn btn-primary" style="margin-top:10px;">Enviar Fotos</button>
+            </form>
+          </div>
         </div>
         <footer>
           Desenvolvido por Nilson Cruz © 2025. Todos os direitos reservados.
@@ -530,9 +668,101 @@ def index():
         <!-- Bootstrap JS e dependências -->
         <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/js/bootstrap.bundle.min.js"></script>
+        <script>
+          // Exibe/oculta a seção de múltiplas fotos
+          document.getElementById('show-multi-upload').addEventListener('click', function() {
+            var section = document.getElementById('multi-upload-section');
+            if(section.style.display === 'none') {
+              section.style.display = 'block';
+            } else {
+              section.style.display = 'none';
+            }
+          });
+          // Adiciona novos campos para upload de múltiplas fotos
+          document.getElementById('add-more').addEventListener('click', function() {
+            var container = document.getElementById('multi-upload-fields');
+            var group = document.createElement('div');
+            group.className = 'multi-upload-group';
+            group.innerHTML = `
+              <div class="form-group">
+                <label>RM do Aluno:</label>
+                <input type="text" class="form-control" name="rm[]" placeholder="Digite o RM">
+              </div>
+              <div class="form-group">
+                <input type="file" class="form-control-file" name="foto_file[]" accept="image/*">
+              </div>
+            `;
+            container.appendChild(group);
+          });
+        </script>
       </body>
     </html>
     '''
+
+@app.route('/upload_foto', methods=['POST'])
+def upload_foto():
+    # Rota para upload da foto do aluno com salvamento persistente (upload via formulário tradicional)
+    if 'foto_file' not in request.files:
+        return "Nenhum arquivo de foto enviado", 400
+    rm = request.form.get('rm')
+    if not rm:
+        return "RM não fornecido", 400
+    file = request.files['foto_file']
+    if file.filename == '':
+        return "Nenhuma foto selecionada", 400
+
+    if not allowed_file(file.filename):
+        return "Formato de imagem não permitido", 400
+    
+    original_filename = secure_filename(file.filename)
+    _, ext = os.path.splitext(original_filename)
+    new_filename = secure_filename(f"{rm}{ext.lower()}")
+    file_path = os.path.join('static', 'fotos', new_filename)
+    file.save(file_path)
+    return redirect(url_for('index'))
+
+@app.route('/upload_multiplas_fotos', methods=['POST'])
+def upload_multiplas_fotos():
+    # Rota para upload de múltiplas fotos, cada uma associada ao respectivo RM
+    rms = request.form.getlist("rm[]")
+    files = request.files.getlist("foto_file[]")
+    
+    if not files:
+       return "Nenhuma foto enviada", 400
+    
+    for rm, file in zip(rms, files):
+        if file.filename == '':
+            continue
+        if not rm:
+            continue
+        if not allowed_file(file.filename):
+            continue
+        original_filename = secure_filename(file.filename)
+        _, ext = os.path.splitext(original_filename)
+        new_filename = secure_filename(f"{rm}{ext.lower()}")
+        file_path = os.path.join('static', 'fotos', new_filename)
+        file.save(file_path)
+    return redirect(url_for('index'))
+
+@app.route('/upload_inline_foto', methods=['POST'])
+def upload_inline_foto():
+    # Rota para upload inline da foto a partir do clique na carteirinha
+    if 'foto_file' not in request.files:
+        return jsonify({'error': 'Nenhum arquivo enviado'}), 400
+    rm = request.form.get('rm')
+    if not rm:
+        return jsonify({'error': 'RM não fornecido'}), 400
+    file = request.files['foto_file']
+    if file.filename == '':
+        return jsonify({'error': 'Nenhuma foto selecionada'}), 400
+    if not allowed_file(file.filename):
+        return jsonify({'error': 'Formato de imagem não permitido'}), 400
+    original_filename = secure_filename(file.filename)
+    _, ext = os.path.splitext(original_filename)
+    new_filename = secure_filename(f"{rm}{ext.lower()}")
+    file_path = os.path.join('static', 'fotos', new_filename)
+    file.save(file_path)
+    return jsonify({'url': f"/static/fotos/{new_filename}"})
 
 if __name__ == '__main__':
     app.run(debug=True)
