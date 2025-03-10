@@ -1,17 +1,21 @@
-from flask import Flask, request, redirect, url_for, render_template_string, jsonify 
+from flask import Flask, request, redirect, url_for, render_template_string, jsonify, session, flash
 import pandas as pd
 import os
 import qrcode
 from io import BytesIO
 from werkzeug.utils import secure_filename
+from functools import wraps
 
 app = Flask(__name__)
+app.secret_key = 'sua_chave_secreta'  # Altere para uma chave segura
+ACCESS_TOKEN = "minha_senha"  # Token de acesso
+
 app.config['UPLOAD_FOLDER'] = 'uploads'
 
 # Lista de extensões permitidas
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif'}
 
-# Cria os diretórios necessários se não existirem
+# Cria os diretórios necessários, se não existirem
 if not os.path.exists('static/qr_codes'):
     os.makedirs('static/qr_codes')
 if not os.path.exists('static/fotos'):
@@ -20,16 +24,24 @@ if not os.path.exists(app.config['UPLOAD_FOLDER']):
     os.makedirs(app.config['UPLOAD_FOLDER'])
 
 def allowed_file(filename):
-    # Retorna True se a extensão do arquivo for permitida
     _, ext = os.path.splitext(filename)
     return ext.lower() in ALLOWED_EXTENSIONS
 
+def login_required(f):
+    @wraps(f)
+    def decorated_function(*args, **kwargs):
+        if not session.get("logged_in"):
+            return redirect(url_for("login", next=request.url))
+        return f(*args, **kwargs)
+    return decorated_function
+
 def gerar_html_carteirinhas(arquivo_excel):
-    # Lê o Excel enviado (arquivo_excel é um objeto file-like)
     planilha = pd.read_excel(arquivo_excel, sheet_name='LISTA CORRIDA')
     dados = planilha[['RM', 'NOME', 'DATA NASC.', 'RA', 'SAI SOZINHO?', 'SÉRIE', 'HORÁRIO']]
     dados['RM'] = dados['RM'].fillna(0).astype(int)
     
+    # Nesta página (geração das carteirinhas) removemos header e footer para não interferir na impressão.
+    # Adicionamos também um overlay de loading e uma mensagem de sucesso para indicar que o processo foi concluído.
     html_content = """
 <!DOCTYPE html>
 <html lang="pt-br">
@@ -37,17 +49,17 @@ def gerar_html_carteirinhas(arquivo_excel):
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>Carteirinhas</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
   <style>
-    /* Estilos para visualização e impressão das carteirinhas */
     body {
-      font-family: 'Roboto', sans-serif;
+      font-family: 'Montserrat', sans-serif;
       margin: 0;
-      padding: 0;
+      padding: 20px;
       background-color: #f4f4f4;
       display: flex;
       flex-direction: column;
       align-items: center;
-      padding: 20px;
     }
     #search-container {
       margin-bottom: 20px;
@@ -68,7 +80,7 @@ def gerar_html_carteirinhas(arquivo_excel):
     .page-number {
       text-align: center;
       font-size: 14px;
-      font-weight: bold;
+      font-weight: 600;
       color: #333;
       margin-bottom: 10px;
     }
@@ -99,7 +111,7 @@ def gerar_html_carteirinhas(arquivo_excel):
       content: "✂️";
       position: absolute;
       top: -14px;
-      right: -13px;
+      right: -11px;
       font-size: 16px;
       color: #2196F3;
     }
@@ -120,7 +132,7 @@ def gerar_html_carteirinhas(arquivo_excel):
     .carteirinha {
       background-color: #fff;
       border-radius: 10px;
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
       overflow: hidden;
       display: flex;
       flex-direction: column;
@@ -132,7 +144,7 @@ def gerar_html_carteirinhas(arquivo_excel):
     }
     .escola {
       font-size: 16px;
-      font-weight: 500;
+      font-weight: 600;
       color: #2196F3;
       margin-bottom: 10px;
       text-align: center;
@@ -165,7 +177,7 @@ def gerar_html_carteirinhas(arquivo_excel):
       margin: 3px 0;
     }
     .info .titulo {
-      font-weight: bold;
+      font-weight: 600;
       color: #2196F3;
       text-transform: uppercase;
       letter-spacing: 0.5px;
@@ -189,7 +201,7 @@ def gerar_html_carteirinhas(arquivo_excel):
     }
     .status {
       padding: 6px;
-      font-weight: bold;
+      font-weight: 600;
       border-radius: 8px;
       color: #fff;
       text-transform: uppercase;
@@ -216,13 +228,39 @@ def gerar_html_carteirinhas(arquivo_excel):
     }
     .qr-code-text {
       font-size: 12px;
-      font-weight: bold;
+      font-weight: 600;
       margin-bottom: 2px;
       text-align: center;
     }
     .qr-code-container img {
       width: 80px;
       height: 80px;
+    }
+    /* Overlay de loading e mensagem de sucesso para a geração de carteirinhas */
+    #loading-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      background: rgba(0, 0, 0, 0.5);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      z-index: 9999;
+    }
+    #loading-overlay .spinner-border {
+      width: 3rem;
+      height: 3rem;
+    }
+    #cards-success {
+      display: none;
+      position: fixed;
+      top: 10px;
+      left: 50%;
+      transform: translateX(-50%);
+      background: #d4edda;
+      color: #155724;
+      padding: 10px;
+      border-radius: 5px;
+      z-index: 10000;
     }
     @media print {
       body {
@@ -244,8 +282,21 @@ def gerar_html_carteirinhas(arquivo_excel):
         justify-items: center;
       }
       .borda-pontilhada {
-        border: 1px dotted #ccc !important;
-        padding: 3px !important;
+        border: none !important;
+        padding: 10px !important;
+        position: relative;
+      }
+      .borda-pontilhada::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 0;
+        right: 0;
+        bottom: 0;
+        pointer-events: none;
+        background-image: radial-gradient(circle, #000 20%, transparent 20%);
+        background-size: 10px 10px;
+        border-radius: 4px;
       }
       .carteirinha::before {
         width: 60px !important;
@@ -300,7 +351,7 @@ def gerar_html_carteirinhas(arquivo_excel):
       font-size: 16px;
       border-radius: 8px;
       cursor: pointer;
-      box-shadow: 0 4px 6px rgba(0, 0, 0, 0.2);
+      box-shadow: 0 4px 6px rgba(0,0,0,0.2);
     }
     .imprimir-pagina {
       background-color: #FF5722;
@@ -322,17 +373,23 @@ def gerar_html_carteirinhas(arquivo_excel):
         margin-bottom: 40px;
       }
     }
-    /* Nova regra para hover na div de upload inline */
     .foto.uploadable:hover {
       transform: scale(1.05);
       transition: all 0.3s ease;
       cursor: pointer;
     }
   </style>
-  <!-- Google Fonts -->
-  <link href="https://fonts.googleapis.com/css?family=Roboto:400,500,700&display=swap" rel="stylesheet">
 </head>
 <body>
+  <div id="loading-overlay">
+    <div style="text-align: center; color: white;">
+      <div class="spinner-border" role="status">
+        <span class="sr-only">Carregando...</span>
+      </div>
+      <p>Carregando carteirinhas...</p>
+    </div>
+  </div>
+  <div id="cards-success">Carteirinhas geradas com sucesso</div>
   <div class="carteirinhas-container">
     <button class="imprimir-carteirinhas" onclick="imprimirCarteirinhas()">Imprimir Carteirinhas</button>
     <div id="search-container">
@@ -344,7 +401,7 @@ def gerar_html_carteirinhas(arquivo_excel):
     html_content += '<div class="page"><div class="page-number">Página ' + str(num_pagina) + '</div>'
     html_content += '<button class="imprimir-pagina" onclick="imprimirPagina(this)">Imprimir Página</button>'
     html_content += '<div class="cards-grid">'
-
+    
     def gerar_qr_code(rm):
         caminho_qr = f'static/qr_codes/{rm}.png'
         qr = qrcode.make(f"RM: {rm} - Se possível, contribua com a APM")
@@ -353,7 +410,6 @@ def gerar_html_carteirinhas(arquivo_excel):
     
     for _, row in dados.iterrows():
         rm = str(row['RM'])
-        # Ignora registros com RM "0"
         if rm == '0':
             continue
         
@@ -361,9 +417,9 @@ def gerar_html_carteirinhas(arquivo_excel):
         data_nasc = row['DATA NASC.']
         serie = row['SÉRIE']
         horario = row['HORÁRIO']
-    
+        
         qr_url = gerar_qr_code(rm)
-    
+        
         if pd.notna(data_nasc):
             try:
                 data_nasc = pd.to_datetime(data_nasc, errors='coerce')
@@ -375,7 +431,7 @@ def gerar_html_carteirinhas(arquivo_excel):
                 data_nasc = "Desconhecida"
         else:
             data_nasc = "Desconhecida"
-    
+        
         ra = row['RA']
         sai_sozinho = row['SAI SOZINHO?']
         if sai_sozinho == 'Sim':
@@ -385,7 +441,6 @@ def gerar_html_carteirinhas(arquivo_excel):
             classe_cor = 'vermelho'
             status_texto = "Não Sai Sozinho"
         
-        # Verifica se há foto com uma das extensões permitidas
         allowed_exts = ['.jpg', '.jpeg', '.png', '.bmp', '.gif']
         found_photo = None
         for ext in allowed_exts:
@@ -394,12 +449,9 @@ def gerar_html_carteirinhas(arquivo_excel):
                 found_photo = f"/static/fotos/{rm}{ext}"
                 break
         
-        # Campo da foto passa a ser clicável para inline upload:
         if found_photo:
             foto_tag = f'<img src="{found_photo}" alt="Foto" class="foto uploadable" data-rm="{rm}">'
         else:
-            # Se não houver foto, mostra ícone de câmera e o texto "Anexe uma foto"
-            # Agora com opacidade reduzida e cor cinza
             foto_tag = f'''
             <div class="foto uploadable" data-rm="{rm}" style="display:flex; flex-direction:column; align-items:center; justify-content:center;">
               <span style="font-size:40px; opacity:0.5; color: grey;">&#128247;</span>
@@ -407,11 +459,9 @@ def gerar_html_carteirinhas(arquivo_excel):
             </div>
             '''
         
-        # Campo hidden para upload inline:
         hidden_input = f'<input type="file" class="inline-upload" data-rm="{rm}" style="display:none;" accept="image/*">'
-            
         qr_tag = f'<img src="{qr_url}" alt="QR Code">'
-    
+        
         html_content += f"""
       <div class="borda-pontilhada">
         <div class="carteirinha">
@@ -450,7 +500,7 @@ def gerar_html_carteirinhas(arquivo_excel):
 """
         contador += 1
         if contador % 4 == 0:
-            html_content += '</div></div>'  # Fecha a grid e a página atual
+            html_content += '</div></div>'
             if contador < len(dados):
                 num_pagina += 1
                 html_content += '<div class="page"><div class="page-number">Página ' + str(num_pagina) + '</div>'
@@ -458,132 +508,268 @@ def gerar_html_carteirinhas(arquivo_excel):
                 html_content += '<div class="cards-grid">'
     
     if contador % 4 != 0:
-        html_content += '</div></div>'  # Fecha a última grid e a última página
+        html_content += '</div></div>'
     
-    # Script para impressão, busca e inline upload de fotos
     html_content += """
   </div>
-<script>
-  function imprimirCarteirinhas() {
-    window.print();
-  }
-  function imprimirPagina(botao) {
-    let pagina = botao.closest('.page');
-    let todasPaginas = document.querySelectorAll('.page');
-    todasPaginas.forEach(p => {
-      if (p !== pagina) {
-        p.style.display = 'none';
-      }
-    });
-    setTimeout(() => {
+  <script>
+    // Remoção do overlay de loading e exibição da mensagem de sucesso após o carregamento completo
+    window.onload = function(){
+      var overlay = document.getElementById('loading-overlay');
+      overlay.style.display = 'none';
+      var cardsMsg = document.getElementById('cards-success');
+      cardsMsg.style.display = 'block';
+      setTimeout(function(){
+        cardsMsg.style.display = 'none';
+      }, 3000);
+    };
+
+    function imprimirCarteirinhas() {
       window.print();
+    }
+    function imprimirPagina(botao) {
+      let pagina = botao.closest('.page');
+      let todasPaginas = document.querySelectorAll('.page');
       todasPaginas.forEach(p => {
-        p.style.display = '';
-      });
-    }, 100);
-  }
-  document.getElementById('localizarAluno').addEventListener('keyup', function() {
-    var filtro = this.value.toLowerCase();
-    var cards = document.querySelectorAll('.borda-pontilhada');
-    cards.forEach(function(card) {
-      var nomeElem = card.querySelector('.linha-nome .descricao');
-      if (nomeElem) {
-        var nome = nomeElem.textContent.toLowerCase();
-        if (nome.indexOf(filtro) > -1) {
-          card.style.display = '';
-        } else {
-          card.style.display = 'none';
+        if (p !== pagina) {
+          p.style.display = 'none';
         }
-      }
-    });
-  });
-  
-  // Função para upload inline da foto ao clicar no campo da foto
-  document.addEventListener('DOMContentLoaded', function() {
-    // Ao clicar na área clicável da foto
-    document.querySelectorAll('.uploadable').forEach(function(element) {
-      element.addEventListener('click', function() {
-        var rm = element.getAttribute('data-rm');
-        var input = document.querySelector('.inline-upload[data-rm="'+rm+'"]');
-        if(input) {
-          input.click();
+      });
+      setTimeout(() => {
+        window.print();
+        todasPaginas.forEach(p => {
+          p.style.display = '';
+        });
+      }, 100);
+    }
+    document.getElementById('localizarAluno').addEventListener('keyup', function() {
+      var filtro = this.value.toLowerCase();
+      var cards = document.querySelectorAll('.borda-pontilhada');
+      cards.forEach(function(card) {
+        var nomeElem = card.querySelector('.linha-nome .descricao');
+        if (nomeElem) {
+          var nome = nomeElem.textContent.toLowerCase();
+          if (nome.indexOf(filtro) > -1) {
+            card.style.display = '';
+          } else {
+            card.style.display = 'none';
+          }
         }
       });
     });
     
-    // Quando o arquivo é selecionado, faz o upload via AJAX
-    document.querySelectorAll('.inline-upload').forEach(function(input) {
-      input.addEventListener('change', function() {
-        var file = input.files[0];
-        if(file) {
-          var rm = input.getAttribute('data-rm');
-          var formData = new FormData();
-          formData.append('rm', rm);
-          formData.append('foto_file', file);
-          
-          fetch('/upload_inline_foto', {
-            method: 'POST',
-            body: formData
-          })
-          .then(response => response.json())
-          .then(data => {
-            if(data.url) {
-              var uploadable = document.querySelector('.uploadable[data-rm="'+rm+'"]');
-              if(uploadable.tagName.toLowerCase() === 'img') {
-                uploadable.src = data.url;
+    // Variável para controlar o tempo da mensagem de upload inline
+    var flashTimeout = null;
+    document.addEventListener('DOMContentLoaded', function() {
+      document.querySelectorAll('.uploadable').forEach(function(element) {
+        element.addEventListener('click', function() {
+          var rm = element.getAttribute('data-rm');
+          var input = document.querySelector('.inline-upload[data-rm="'+rm+'"]');
+          if(input) {
+            input.click();
+          }
+        });
+      });
+      
+      document.querySelectorAll('.inline-upload').forEach(function(input) {
+        input.addEventListener('change', function() {
+          var file = input.files[0];
+          if(file) {
+            var rm = input.getAttribute('data-rm');
+            var formData = new FormData();
+            formData.append('rm', rm);
+            formData.append('foto_file', file);
+            
+            fetch('/upload_inline_foto', {
+              method: 'POST',
+              body: formData
+            })
+            .then(response => response.json())
+            .then(data => {
+              if(data.url) {
+                var uploadable = document.querySelector('.uploadable[data-rm="'+rm+'"]');
+                if(uploadable.tagName.toLowerCase() === 'img') {
+                  uploadable.src = data.url;
+                } else {
+                  var img = document.createElement('img');
+                  img.src = data.url;
+                  img.alt = "Foto";
+                  img.className = "foto uploadable";
+                  img.setAttribute('data-rm', rm);
+                  uploadable.parentNode.replaceChild(img, uploadable);
+                }
+                // Exibe mensagem de sucesso para upload inline
+                var msgDiv = document.getElementById('upload-success');
+                if(!msgDiv){
+                  msgDiv = document.createElement('div');
+                  msgDiv.id = 'upload-success';
+                  msgDiv.style.position = 'fixed';
+                  msgDiv.style.top = '10px';
+                  msgDiv.style.right = '10px';
+                  msgDiv.style.backgroundColor = '#d4edda';
+                  msgDiv.style.color = '#155724';
+                  msgDiv.style.padding = '10px';
+                  msgDiv.style.borderRadius = '5px';
+                  document.body.appendChild(msgDiv);
+                }
+                msgDiv.style.display = 'block';
+                msgDiv.innerHTML = data.message;
+                if(flashTimeout) {
+                  clearTimeout(flashTimeout);
+                }
+                flashTimeout = setTimeout(function(){
+                  msgDiv.style.display = 'none';
+                }, 3000);
               } else {
-                var img = document.createElement('img');
-                img.src = data.url;
-                img.alt = "Foto";
-                img.className = "foto uploadable";
-                img.setAttribute('data-rm', rm);
-                uploadable.parentNode.replaceChild(img, uploadable);
+                alert("Erro ao fazer upload: " + (data.error || "Erro desconhecido"));
               }
-            } else {
-              alert("Erro ao fazer upload: " + (data.error || "Erro desconhecido"));
-            }
-          })
-          .catch(error => {
-            console.error('Erro:', error);
-            alert("Erro no upload da foto.");
-          });
-        }
+            })
+            .catch(error => {
+              console.error('Erro:', error);
+              alert("Erro no upload da foto.");
+            });
+          }
+        });
       });
     });
-  });
-</script>
+  </script>
 </body>
 </html>
 """
     return html_content
 
+@app.route('/login', methods=['GET', 'POST'])
+def login():
+    error = None
+    if request.method == 'POST':
+        token = request.form.get('token')
+        if token == ACCESS_TOKEN:
+            session['logged_in'] = True
+            return redirect(url_for('index'))
+        else:
+            error = "Token inválido. Tente novamente."
+    login_html = '''
+    <!doctype html>
+    <html lang="pt-br">
+      <head>
+        <meta charset="utf-8">
+        <title>Login - Acesso Restrito</title>
+        <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
+        <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+        <style>
+          body {
+            background: linear-gradient(135deg, #283E51, #4B79A1);
+            font-family: 'Montserrat', sans-serif;
+            margin: 0;
+            padding: 0;
+            display: flex;
+            flex-direction: column;
+            min-height: 100vh;
+          }
+          header {
+            background-color: #283E51;
+            color: #fff;
+            padding: 20px;
+            text-align: center;
+          }
+          main {
+            flex: 1;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+          }
+          .container-login {
+            background: #fff;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            width: 100%;
+            max-width: 400px;
+          }
+          .container-login h2 {
+            margin-bottom: 20px;
+            font-weight: 600;
+            color: #283E51;
+          }
+          .btn-primary {
+            background-color: #283E51;
+            border: none;
+          }
+          .btn-primary:hover {
+            background-color: #1d2d3a;
+          }
+          footer {
+            background-color: #424242;
+            color: #fff;
+            text-align: center;
+            padding: 10px;
+          }
+          .error {
+            color: red;
+            margin-top: 15px;
+          }
+        </style>
+      </head>
+      <body>
+        <header>
+          <h1 class="mb-0">Carteirinhas - E.M José Padin Mouta</h1>
+        </header>
+        <main>
+          <div class="container container-login">
+            <h2>Acesso Restrito</h2>
+            <form method="POST">
+              <div class="form-group">
+                <input type="password" name="token" class="form-control" placeholder="Digite o token de acesso" required>
+              </div>
+              <button type="submit" class="btn btn-primary btn-block">Entrar</button>
+            </form>
+            {% if error %}
+              <p class="error">{{ error }}</p>
+            {% endif %}
+          </div>
+        </main>
+        <footer>
+          Desenvolvido por Nilson Cruz © 2025. Todos os direitos reservados.
+        </footer>
+      </body>
+    </html>
+    '''
+    return render_template_string(login_html, error=error)
+
+@app.route('/logout')
+def logout():
+    session.clear()
+    return redirect(url_for('login'))
+
 @app.route('/', methods=['GET', 'POST'])
+@login_required
 def index():
-    # Página inicial com formulários para upload do Excel, upload de foto única, múltiplas fotos e upload inline na carteirinha
     if request.method == 'POST':
         if 'excel_file' in request.files:
             file = request.files['excel_file']
             if file.filename == '':
                 return "Nenhum arquivo selecionado", 400
+            # Exibe uma mensagem de loading ao clicar em "Gerar Carteirinhas"
+            flash("Gerando carteirinhas. Aguarde...", "info")
             html_result = gerar_html_carteirinhas(file)
+            # Após gerar, adicione uma mensagem de sucesso via JS no template gerado (veja o overlay no código acima)
             return html_result
-    return '''
+    index_html = '''
     <!doctype html>
     <html lang="pt-br">
       <head>
         <meta charset="utf-8">
         <title>Upload para Carteirinhas</title>
-        <!-- Bootstrap CSS -->
         <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-        <!-- Google Fonts -->
-        <link href="https://fonts.googleapis.com/css?family=Roboto:400,500,700&display=swap" rel="stylesheet">
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+        <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
         <style>
           body {
-            background-color: #f4f4f4;
-            font-family: 'Roboto', sans-serif;
+            background: #eef2f3;
+            font-family: 'Montserrat', sans-serif;
           }
           header {
-            background-color: #2196F3;
+            background-color: #283E51;
             color: #fff;
             padding: 20px;
             text-align: center;
@@ -592,8 +778,44 @@ def index():
             background: #fff;
             padding: 40px;
             border-radius: 10px;
-            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            margin-top: 40px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            margin: 40px auto;
+            max-width: 800px;
+          }
+          h2 {
+            color: #283E51;
+            font-weight: 600;
+          }
+          .btn-primary {
+            background-color: #283E51;
+            border: none;
+          }
+          .btn-primary:hover {
+            background-color: #1d2d3a;
+          }
+          .btn-secondary {
+            background-color: #4B79A1;
+            border: none;
+          }
+          .btn-secondary:hover {
+            background-color: #3a5d78;
+          }
+          .logout-container {
+            text-align: center;
+            margin-top: 20px;
+          }
+          .btn-logout {
+            background-color: #dc3545;
+            color: #fff;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            text-decoration: none;
+            transition: background-color 0.3s;
+          }
+          .btn-logout:hover {
+            background-color: #c82333;
           }
           footer {
             background-color: #424242;
@@ -604,7 +826,6 @@ def index():
             bottom: 0;
             width: 100%;
           }
-          /* Estilos para o formulário de múltiplas fotos */
           #multi-upload-section {
             margin-top: 20px;
             border: 1px solid #ccc;
@@ -615,6 +836,14 @@ def index():
           .multi-upload-group {
             margin-bottom: 15px;
           }
+          /* Oculta as mensagens flash após 3 segundos */
+          #flash-messages {
+            position: fixed;
+            top: 10px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 10000;
+          }
         </style>
       </head>
       <body>
@@ -622,8 +851,17 @@ def index():
           <h1 class="mb-0">Carteirinhas - E.M José Padin Mouta</h1>
         </header>
         <div class="container container-upload">
+          {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+              <div id="flash-messages">
+                {% for category, message in messages %}
+                  <div class="alert alert-{{ 'success' if category == 'success' else 'info' }}" role="alert">{{ message }}</div>
+                {% endfor %}
+              </div>
+            {% endif %}
+          {% endwith %}
           <h2 class="mb-4">Envie a lista piloto (Excel)</h2>
-          <form method="POST" enctype="multipart/form-data">
+          <form method="POST" enctype="multipart/form-data" onsubmit="showLoading()">
             <div class="form-group">
               <input type="file" class="form-control-file" name="excel_file" accept=".xlsx, .xls">
             </div>
@@ -661,15 +899,51 @@ def index():
               <button type="submit" class="btn btn-primary" style="margin-top:10px;">Enviar Fotos</button>
             </form>
           </div>
+          <div class="logout-container">
+            <a href="/logout" class="btn-logout">
+              <i class="fas fa-sign-out-alt"></i> Logout
+            </a>
+          </div>
         </div>
         <footer>
           Desenvolvido por Nilson Cruz © 2025. Todos os direitos reservados.
         </footer>
-        <!-- Bootstrap JS e dependências -->
         <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/js/bootstrap.bundle.min.js"></script>
         <script>
-          // Exibe/oculta a seção de múltiplas fotos
+          // Remove as mensagens flash após 3 segundos
+          setTimeout(function(){
+            var flashDiv = document.getElementById('flash-messages');
+            if(flashDiv){
+              flashDiv.style.display = 'none';
+            }
+          }, 3000);
+          
+          function showLoading(){
+            // Exibe uma sobreposição de loading para geração de carteirinhas
+            var loadingOverlay = document.createElement('div');
+            loadingOverlay.id = 'loading-overlay';
+            loadingOverlay.style.position = 'fixed';
+            loadingOverlay.style.top = '0';
+            loadingOverlay.style.left = '0';
+            loadingOverlay.style.right = '0';
+            loadingOverlay.style.bottom = '0';
+            loadingOverlay.style.background = 'rgba(0,0,0,0.5)';
+            loadingOverlay.style.display = 'flex';
+            loadingOverlay.style.alignItems = 'center';
+            loadingOverlay.style.justifyContent = 'center';
+            loadingOverlay.style.zIndex = '9999';
+            loadingOverlay.innerHTML = `
+              <div style="text-align: center; color: white;">
+                <div class="spinner-border" role="status">
+                  <span class="sr-only">Carregando...</span>
+                </div>
+                <p>Carregando carteirinhas...</p>
+              </div>
+            `;
+            document.body.appendChild(loadingOverlay);
+          }
+          
           document.getElementById('show-multi-upload').addEventListener('click', function() {
             var section = document.getElementById('multi-upload-section');
             if(section.style.display === 'none') {
@@ -678,7 +952,6 @@ def index():
               section.style.display = 'none';
             }
           });
-          // Adiciona novos campos para upload de múltiplas fotos
           document.getElementById('add-more').addEventListener('click', function() {
             var container = document.getElementById('multi-upload-fields');
             var group = document.createElement('div');
@@ -698,10 +971,10 @@ def index():
       </body>
     </html>
     '''
+    return render_template_string(index_html)
 
 @app.route('/upload_foto', methods=['POST'])
 def upload_foto():
-    # Rota para upload da foto do aluno com salvamento persistente (upload via formulário tradicional)
     if 'foto_file' not in request.files:
         return "Nenhum arquivo de foto enviado", 400
     rm = request.form.get('rm')
@@ -710,7 +983,6 @@ def upload_foto():
     file = request.files['foto_file']
     if file.filename == '':
         return "Nenhuma foto selecionada", 400
-
     if not allowed_file(file.filename):
         return "Formato de imagem não permitido", 400
     
@@ -719,11 +991,11 @@ def upload_foto():
     new_filename = secure_filename(f"{rm}{ext.lower()}")
     file_path = os.path.join('static', 'fotos', new_filename)
     file.save(file_path)
+    flash("Foto anexada com sucesso", "success")
     return redirect(url_for('index'))
 
 @app.route('/upload_multiplas_fotos', methods=['POST'])
 def upload_multiplas_fotos():
-    # Rota para upload de múltiplas fotos, cada uma associada ao respectivo RM
     rms = request.form.getlist("rm[]")
     files = request.files.getlist("foto_file[]")
     
@@ -742,11 +1014,11 @@ def upload_multiplas_fotos():
         new_filename = secure_filename(f"{rm}{ext.lower()}")
         file_path = os.path.join('static', 'fotos', new_filename)
         file.save(file_path)
+    flash("Foto(s) anexada(s) com sucesso", "success")
     return redirect(url_for('index'))
 
 @app.route('/upload_inline_foto', methods=['POST'])
 def upload_inline_foto():
-    # Rota para upload inline da foto a partir do clique na carteirinha
     if 'foto_file' not in request.files:
         return jsonify({'error': 'Nenhum arquivo enviado'}), 400
     rm = request.form.get('rm')
@@ -762,7 +1034,7 @@ def upload_inline_foto():
     new_filename = secure_filename(f"{rm}{ext.lower()}")
     file_path = os.path.join('static', 'fotos', new_filename)
     file.save(file_path)
-    return jsonify({'url': f"/static/fotos/{new_filename}"})
+    return jsonify({'url': f"/static/fotos/{new_filename}", 'message': "Foto anexada com sucesso"})
 
 if __name__ == '__main__':
     app.run(debug=True)
