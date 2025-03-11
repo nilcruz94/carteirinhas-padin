@@ -1,7 +1,6 @@
-from flask import Flask, request, redirect, url_for, render_template_string, jsonify, session, flash
+from flask import Flask, request, redirect, url_for, render_template_string, jsonify, session, flash 
 import pandas as pd
 import os
-import qrcode
 from io import BytesIO
 from werkzeug.utils import secure_filename
 from functools import wraps
@@ -16,8 +15,6 @@ app.config['UPLOAD_FOLDER'] = 'uploads'
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif'}
 
 # Cria os diretórios necessários, se não existirem
-if not os.path.exists('static/qr_codes'):
-    os.makedirs('static/qr_codes')
 if not os.path.exists('static/fotos'):
     os.makedirs('static/fotos')
 if not os.path.exists(app.config['UPLOAD_FOLDER']):
@@ -40,8 +37,7 @@ def gerar_html_carteirinhas(arquivo_excel):
     dados = planilha[['RM', 'NOME', 'DATA NASC.', 'RA', 'SAI SOZINHO?', 'SÉRIE', 'HORÁRIO']]
     dados['RM'] = dados['RM'].fillna(0).astype(int)
     
-    # Nesta página (geração das carteirinhas) removemos header e footer para não interferir na impressão.
-    # Adicionamos também um overlay de loading e uma mensagem de sucesso para indicar que o processo foi concluído.
+    # HTML para geração das carteirinhas com dimensões de 9.0cm (altura) x 6.0cm (largura)
     html_content = """
 <!DOCTYPE html>
 <html lang="pt-br">
@@ -51,7 +47,7 @@ def gerar_html_carteirinhas(arquivo_excel):
   <title>Carteirinhas</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
-  <style>
+ <style>
     body {
       font-family: 'Montserrat', sans-serif;
       margin: 0;
@@ -65,9 +61,9 @@ def gerar_html_carteirinhas(arquivo_excel):
       margin-bottom: 20px;
     }
     #localizarAluno {
-      padding: 8px;
-      font-size: 16px;
-      width: 300px;
+      padding: 0.2cm;
+      font-size: 0.3cm;
+      width: 3.5cm;
     }
     .carteirinhas-container {
       width: 100%;
@@ -79,88 +75,77 @@ def gerar_html_carteirinhas(arquivo_excel):
     }
     .page-number {
       text-align: center;
-      font-size: 14px;
+      font-size: 0.3cm;
       font-weight: 600;
       color: #333;
-      margin-bottom: 10px;
+      margin-bottom: 0.2cm;
     }
     .cards-grid {
       display: grid;
       grid-template-columns: repeat(2, 1fr);
-      gap: 10px;
+      gap: 0.2cm;
       justify-items: center;
     }
     .borda-pontilhada {
-      border: 1px dotted #ccc;
-      padding: 5px;
+      border: 0.05cm dotted #ccc;
+      padding: 0.1cm;
       position: relative;
-    }
-    .carteirinha::before {
-      content: "";
-      position: absolute;
-      top: -15px;
-      left: 50%;
-      transform: translateX(-50%);
-      width: 60px;
-      height: 30px;
-      background-color: #d0d0d0;
-      border-radius: 15px;
-      z-index: 10;
     }
     .borda-pontilhada::after {
       content: "✂️";
       position: absolute;
-      top: -14px;
-      right: -11px;
-      font-size: 16px;
+      top: -0.35cm;
+      right: -0.30cm;
+      font-size: 0.3cm;
       color: #2196F3;
     }
     input {
       width: 100%;
-      padding: 12px 20px;
-      margin: 8px 0;
-      border: 1px solid #ccc;
-      border-radius: 8px;
+      padding: 0.2cm;
+      margin: 0.1cm 0;
+      border: 0.05cm solid #ccc;
+      border-radius: 0.2cm;
       box-sizing: border-box;
-      font-size: 16px;
+      font-size: 0.3cm;
     }
     input:focus {
       border-color: #008CBA;
-      box-shadow: 0 0 5px rgba(0, 140, 186, 0.5);
+      box-shadow: 0 0 0.2cm rgba(0, 140, 186, 0.5);
       outline: none;
     }
     .carteirinha {
       background-color: #fff;
-      border-radius: 10px;
-      box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+      border-radius: 0.3cm;
+      box-shadow: 0 0.1cm 0.2cm rgba(0,0,0,0.1);
       overflow: hidden;
       display: flex;
       flex-direction: column;
-      width: 270px;
-      height: 550px;
-      padding: 10px;
+      width: 6.0cm;
+      height: 9.0cm;
+      padding: 0.2cm;
       position: relative;
-      border: 4px solid #2196F3;
+      border: 0.05cm solid #2196F3;
     }
     .escola {
-      font-size: 16px;
+      font-size: 0.35cm;
       font-weight: 600;
       color: #2196F3;
-      margin-bottom: 10px;
+      margin-bottom: 0.1cm;
       text-align: center;
       text-transform: uppercase;
-      letter-spacing: 1px;
-      margin-top: 10px;
+      letter-spacing: 0.05cm;
+      margin-top: 0.1cm;
+      white-space: nowrap;
     }
     .foto {
-      width: 140px;
-      height: 160px;
-      margin-bottom: 10px;
+      width: 1.8cm;
+      height: 1.8cm;
+      margin-bottom: 0.1cm;
       border-radius: 50%;
       object-fit: cover;
       margin-left: auto;
       margin-right: auto;
-      border: 4px solid #2196F3;
+      border: 0.1cm solid #2196F3;
       cursor: pointer;
     }
     .info {
@@ -168,49 +153,46 @@ def gerar_html_carteirinhas(arquivo_excel):
       flex-direction: column;
       align-items: flex-start;
       text-align: left;
-      margin-left: 15px;
-      margin-bottom: 10px;
-      font-size: 12px;
+      margin-left: 0.1cm;
+      margin-bottom: 0.1cm;
+      font-size: 0.3cm;
       color: #333;
     }
     .info div, .info span {
-      margin: 3px 0;
+      margin: 0.08cm 0;
     }
     .info .titulo {
       font-weight: 600;
       color: #2196F3;
       text-transform: uppercase;
-      letter-spacing: 0.5px;
+      letter-spacing: 0.02cm;
     }
     .info .descricao {
       color: #555;
     }
-    .info .linha, .info .linha-ra {
-      display: flex;
-      justify-content: space-between;
-      width: 100%;
-    }
-    .info .linha-ra {
-      flex-wrap: nowrap;
-      white-space: nowrap;
-    }
     .linha-nome {
       display: flex;
       align-items: center;
-      gap: 5px;
+      gap: 0.1cm;
+    }
+    .linha, .linha-ra, .linha-horario, .linha-rm {
+      display: flex;
+      flex-direction: row;
+      align-items: center;
+      gap: 0.2cm;
     }
     .status {
-      padding: 6px;
+      padding: 0.2cm;
       font-weight: 600;
-      border-radius: 8px;
+      border-radius: 0.2cm;
       color: #fff;
       text-transform: uppercase;
-      margin-bottom: 5px;
+      margin-bottom: 0.1cm;
       display: flex;
       justify-content: center;
       align-items: center;
-      height: 35px;
-      min-width: 150px;
+      height: 0.6cm;
+      min-width: 1.5cm;
       text-align: center;
     }
     .verde {
@@ -219,24 +201,16 @@ def gerar_html_carteirinhas(arquivo_excel):
     .vermelho {
       background-color: #E57373;
     }
-    .qr-code-container {
-      display: flex;
-      justify-content: center;
-      align-items: center;
-      flex-direction: column;
-      margin-top: 10px;
-    }
-    .qr-code-text {
-      font-size: 12px;
-      font-weight: 600;
-      margin-bottom: 2px;
+    .ano {
+      position: absolute;
+      bottom: 0.2cm;
+      left: 0;
+      right: 0;
       text-align: center;
+      font-size: 0.4cm;
+      font-weight: 600;
+      color: #2196F3;
     }
-    .qr-code-container img {
-      width: 80px;
-      height: 80px;
-    }
-    /* Overlay de loading e mensagem de sucesso para a geração de carteirinhas */
     #loading-overlay {
       position: fixed;
       top: 0; left: 0; right: 0; bottom: 0;
@@ -258,8 +232,8 @@ def gerar_html_carteirinhas(arquivo_excel):
       transform: translateX(-50%);
       background: #d4edda;
       color: #155724;
-      padding: 10px;
-      border-radius: 5px;
+      padding: 0.2cm;
+      border-radius: 0.2cm;
       z-index: 10000;
     }
     @media print {
@@ -267,71 +241,52 @@ def gerar_html_carteirinhas(arquivo_excel):
         background-color: #fff;
         margin: 0;
         padding: 0;
-      }
-      #search-container {
-        display: none !important;
+        display: flex;
+        align-items: center;
+        justify-content: center;
       }
       .carteirinhas-container {
         width: 100%;
         max-width: 1100px;
+        margin: auto;
+      }
+      .page {
+        display: flex;
+        flex-direction: column;
+        justify-content: center;
+        min-height: 100vh;
+        margin-bottom: 0;
+        page-break-after: always;
+        break-after: page;
+      }
+      #search-container {
+        display: none !important;
       }
       .cards-grid {
         display: grid;
         grid-template-columns: repeat(2, 1fr);
-        gap: 20px;
+        gap: 0.2cm;
         justify-items: center;
       }
-      .borda-pontilhada {
-        border: none !important;
-        padding: 10px !important;
-        position: relative;
-      }
-      .borda-pontilhada::before {
-        content: "";
-        position: absolute;
-        top: 0;
-        left: 0;
-        right: 0;
-        bottom: 0;
-        pointer-events: none;
-        background-image: radial-gradient(circle, #000 20%, transparent 20%);
-        background-size: 10px 10px;
-        border-radius: 4px;
-      }
-      .carteirinha::before {
-        width: 60px !important;
-        height: 30px !important;
-        background-color: #d0d0d0 !important;
-        border-radius: 15px !important;
-        z-index: 10 !important;
-        top: -15px !important;
-        left: 50% !important;
-        transform: translateX(-50%) !important;
-      }
-      .carteirinha {
-        width: 250px;
-        height: 455px !important;
+      .carteirinhas-container .cards-grid .carteirinha {
+        width: 6.0cm;
+        height: 9.0cm !important;
         page-break-inside: avoid;
-        padding-top: 5px;
+        padding-top: 0.2cm;
       }
       .status {
-        height: 30px;
-        line-height: 30px;
+        height: 0.6cm;
+        line-height: 0.6cm;
         text-align: center;
       }
       .foto {
-        width: 110px;
-        height: 130px;
-        border: 4px solid #2196F3;
+        width: 1.8cm;
+        height: 1.8cm;
+        border: 0.1cm solid #2196F3;
         object-fit: cover;
       }
       .info {
-        margin-top: 5px;
-      }
-      .page {
-        page-break-after: always;
-        break-after: page;
-        margin-bottom: 0;
+        margin-top: 0.1cm;
       }
       @page {
         size: A4 portrait;
@@ -343,24 +298,24 @@ def gerar_html_carteirinhas(arquivo_excel):
     }
     .imprimir-carteirinhas {
       position: fixed;
-      bottom: 20px;
-      right: 20px;
+      bottom: 0.5cm;
+      right: 0.5cm;
       background-color: #2196F3;
       color: #fff;
-      padding: 10px 20px;
-      font-size: 16px;
-      border-radius: 8px;
+      padding: 0.2cm 0.4cm;
+      font-size: 0.3cm;
+      border-radius: 0.2cm;
       cursor: pointer;
-      box-shadow: 0 4px 6px rgba(0,0,0,0.2);
+      box-shadow: 0 0.1cm 0.2cm rgba(0,0,0,0.2);
     }
     .imprimir-pagina {
       background-color: #FF5722;
       color: #fff;
-      padding: 10px 20px;
-      font-size: 14px;
-      border-radius: 5px;
+      padding: 0.2cm 0.4cm;
+      font-size: 0.3cm;
+      border-radius: 0.2cm;
       cursor: pointer;
-      margin: 5px auto;
+      margin: 0.2cm auto;
       display: block;
     }
     .imprimir-pagina:hover {
@@ -368,9 +323,9 @@ def gerar_html_carteirinhas(arquivo_excel):
     }
     @media screen {
       .page {
-        border: 2px dashed #ccc;
-        padding: 10px;
-        margin-bottom: 40px;
+        border: 0.05cm dashed #ccc;
+        padding: 0.2cm;
+        margin-bottom: 0.5cm;
       }
     }
     .foto.uploadable:hover {
@@ -402,12 +357,6 @@ def gerar_html_carteirinhas(arquivo_excel):
     html_content += '<button class="imprimir-pagina" onclick="imprimirPagina(this)">Imprimir Página</button>'
     html_content += '<div class="cards-grid">'
     
-    def gerar_qr_code(rm):
-        caminho_qr = f'static/qr_codes/{rm}.png'
-        qr = qrcode.make(f"RM: {rm} - Se possível, contribua com a APM")
-        qr.save(caminho_qr)
-        return f"/static/qr_codes/{rm}.png"
-    
     for _, row in dados.iterrows():
         rm = str(row['RM'])
         if rm == '0':
@@ -417,8 +366,6 @@ def gerar_html_carteirinhas(arquivo_excel):
         data_nasc = row['DATA NASC.']
         serie = row['SÉRIE']
         horario = row['HORÁRIO']
-        
-        qr_url = gerar_qr_code(rm)
         
         if pd.notna(data_nasc):
             try:
@@ -452,15 +399,15 @@ def gerar_html_carteirinhas(arquivo_excel):
         if found_photo:
             foto_tag = f'<img src="{found_photo}" alt="Foto" class="foto uploadable" data-rm="{rm}">'
         else:
+            # O ícone da câmera fica acima do texto, ambos centralizados
             foto_tag = f'''
-            <div class="foto uploadable" data-rm="{rm}" style="display:flex; flex-direction:column; align-items:center; justify-content:center;">
-              <span style="font-size:40px; opacity:0.5; color: grey;">&#128247;</span>
-              <small style="font-size:12px; opacity:0.5; color: grey;">Anexe uma foto</small>
+            <div class="foto uploadable" data-rm="{rm}" style="display: flex; flex-direction: column; align-items: center; justify-content: center;">
+              <span style="font-size:0.8cm; opacity:0.5; color: grey; margin-bottom: 0.1cm;">&#128247;</span>
+              <small style="font-size:0.2cm; opacity:0.5; color: grey;">Anexe uma foto</small>
             </div>
             '''
         
         hidden_input = f'<input type="file" class="inline-upload" data-rm="{rm}" style="display:none;" accept="image/*">'
-        qr_tag = f'<img src="{qr_url}" alt="QR Code">'
         
         html_content += f"""
       <div class="borda-pontilhada">
@@ -473,28 +420,29 @@ def gerar_html_carteirinhas(arquivo_excel):
               <span class="titulo">Nome:</span>
               <span class="descricao">{nome}</span>
             </div>
-            <div class="linha-rm" style="white-space: nowrap;">
+            <div class="linha-rm">
               <span class="titulo">RM:</span>
               <span class="descricao">{rm}</span>
             </div>
             <div class="linha">
               <div class="titulo">Série:</div>
               <div class="descricao">{serie}</div>
+            </div>
+            <div class="linha">
               <div class="titulo">Data Nasc.:</div>
               <div class="descricao">{data_nasc}</div>
             </div>
             <div class="linha-ra">
               <div class="titulo">RA:</div>
               <div class="descricao">{ra}</div>
+            </div>
+            <div class="linha-horario">
               <div class="titulo">Horário:</div>
               <div class="descricao">{horario}</div>
             </div>
           </div>
           <div class="status {classe_cor}">{status_texto}</div>
-          <div class="qr-code-container">
-            <div class="qr-code-text">Se possível, contribua com a APM</div>
-            {qr_tag}
-          </div>
+          <div class="ano">2025</div>
         </div>
       </div>
 """
@@ -513,132 +461,187 @@ def gerar_html_carteirinhas(arquivo_excel):
     html_content += """
   </div>
   <script>
-    // Remoção do overlay de loading e exibição da mensagem de sucesso após o carregamento completo
-    window.onload = function(){
-      var overlay = document.getElementById('loading-overlay');
+  function showLoading() {
+    var existingOverlay = document.getElementById('loading-overlay');
+    if (existingOverlay) {
+      existingOverlay.remove();
+    }
+  
+    var loadingOverlay = document.createElement('div');
+    loadingOverlay.id = 'loading-overlay';
+    loadingOverlay.style.position = 'fixed';
+    loadingOverlay.style.top = '0';
+    loadingOverlay.style.left = '0';
+    loadingOverlay.style.right = '0';
+    loadingOverlay.style.bottom = '0';
+    loadingOverlay.style.background = 'rgba(0,0,0,0.5)';
+    loadingOverlay.style.display = 'flex';
+    loadingOverlay.style.alignItems = 'center';
+    loadingOverlay.style.justifyContent = 'center';
+    loadingOverlay.style.zIndex = '9999';
+  
+    loadingOverlay.innerHTML = `
+      <div style="text-align: center; color: white; font-family: Arial, sans-serif;">
+        <svg width="3.0cm" height="4.5cm" viewBox="0 0 6.0 9.0" xmlns="http://www.w3.org/2000/svg">
+          <rect x="0.3" y="0.3" width="5.4" height="8.4" rx="0.3" ry="0.3" stroke="white" stroke-width="0.1" fill="none" />
+          <rect id="badge-fill" x="0.3" y="8.7" width="5.4" height="0" rx="0.3" ry="0.3" fill="white" />
+        </svg>
+        <p id="loading-text" style="margin-top: 0.2cm;">Gerando carteirinhas...</p>
+      </div>
+    `;
+  
+    document.body.appendChild(loadingOverlay);
+  
+    let fillHeight = 0;
+    const maxHeight = 8.4; 
+    function animateBadge() {
+      fillHeight += 0.2;
+      if (fillHeight > maxHeight) {
+        fillHeight = 0;
+      }
+      const badgeFill = document.getElementById('badge-fill');
+      badgeFill.setAttribute('y', 8.7 - fillHeight);
+      badgeFill.setAttribute('height', fillHeight);
+    }
+  
+    var animationId = setInterval(animateBadge, 100);
+    loadingOverlay.dataset.animationId = animationId;
+  }
+  
+  showLoading();
+  
+  window.onload = function(){
+    var overlay = document.getElementById('loading-overlay');
+    if (overlay) {
+      var animationId = Number(overlay.dataset.animationId);
+      clearInterval(animationId);
       overlay.style.display = 'none';
-      var cardsMsg = document.getElementById('cards-success');
+    }
+    var cardsMsg = document.getElementById('cards-success');
+    if (cardsMsg) {
       cardsMsg.style.display = 'block';
+      cardsMsg.innerHTML = 'Carteirinhas geradas com sucesso!';
       setTimeout(function(){
         cardsMsg.style.display = 'none';
       }, 3000);
-    };
-
-    function imprimirCarteirinhas() {
+    }
+  };
+  
+  function imprimirCarteirinhas() {
+    window.print();
+  }
+  
+  function imprimirPagina(botao) {
+    let pagina = botao.closest('.page');
+    let todasPaginas = document.querySelectorAll('.page');
+    todasPaginas.forEach(p => {
+      if (p !== pagina) {
+        p.style.display = 'none';
+      }
+    });
+    setTimeout(() => {
       window.print();
-    }
-    function imprimirPagina(botao) {
-      let pagina = botao.closest('.page');
-      let todasPaginas = document.querySelectorAll('.page');
       todasPaginas.forEach(p => {
-        if (p !== pagina) {
-          p.style.display = 'none';
-        }
+        p.style.display = '';
       });
-      setTimeout(() => {
-        window.print();
-        todasPaginas.forEach(p => {
-          p.style.display = '';
-        });
-      }, 100);
-    }
-    document.getElementById('localizarAluno').addEventListener('keyup', function() {
-      var filtro = this.value.toLowerCase();
-      var cards = document.querySelectorAll('.borda-pontilhada');
-      cards.forEach(function(card) {
-        var nomeElem = card.querySelector('.linha-nome .descricao');
-        if (nomeElem) {
-          var nome = nomeElem.textContent.toLowerCase();
-          if (nome.indexOf(filtro) > -1) {
-            card.style.display = '';
-          } else {
-            card.style.display = 'none';
-          }
+    }, 100);
+  }
+  
+  document.getElementById('localizarAluno').addEventListener('keyup', function() {
+    var filtro = this.value.toLowerCase();
+    var cards = document.querySelectorAll('.borda-pontilhada');
+    cards.forEach(function(card) {
+      var nomeElem = card.querySelector('.linha-nome .descricao');
+      if (nomeElem) {
+        var nome = nomeElem.textContent.toLowerCase();
+        if (nome.indexOf(filtro) > -1) {
+          card.style.display = '';
+        } else {
+          card.style.display = 'none';
+        }
+      }
+    });
+  });
+  
+  var flashTimeout = null;
+  document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.uploadable').forEach(function(element) {
+      element.addEventListener('click', function() {
+        var rm = element.getAttribute('data-rm');
+        var input = document.querySelector('.inline-upload[data-rm="'+rm+'"]');
+        if(input) {
+          input.click();
         }
       });
     });
     
-    // Variável para controlar o tempo da mensagem de upload inline
-    var flashTimeout = null;
-    document.addEventListener('DOMContentLoaded', function() {
-      document.querySelectorAll('.uploadable').forEach(function(element) {
-        element.addEventListener('click', function() {
-          var rm = element.getAttribute('data-rm');
-          var input = document.querySelector('.inline-upload[data-rm="'+rm+'"]');
-          if(input) {
-            input.click();
-          }
-        });
-      });
-      
-      document.querySelectorAll('.inline-upload').forEach(function(input) {
-        input.addEventListener('change', function() {
-          var file = input.files[0];
-          if(file) {
-            var rm = input.getAttribute('data-rm');
-            var formData = new FormData();
-            formData.append('rm', rm);
-            formData.append('foto_file', file);
-            
-            fetch('/upload_inline_foto', {
-              method: 'POST',
-              body: formData
-            })
-            .then(response => response.json())
-            .then(data => {
-              if(data.url) {
-                var uploadable = document.querySelector('.uploadable[data-rm="'+rm+'"]');
-                if(uploadable.tagName.toLowerCase() === 'img') {
-                  uploadable.src = data.url;
-                } else {
-                  var img = document.createElement('img');
-                  img.src = data.url;
-                  img.alt = "Foto";
-                  img.className = "foto uploadable";
-                  img.setAttribute('data-rm', rm);
-                  uploadable.parentNode.replaceChild(img, uploadable);
-                }
-                // Exibe mensagem de sucesso para upload inline
-                var msgDiv = document.getElementById('upload-success');
-                if(!msgDiv){
-                  msgDiv = document.createElement('div');
-                  msgDiv.id = 'upload-success';
-                  msgDiv.style.position = 'fixed';
-                  msgDiv.style.top = '10px';
-                  msgDiv.style.right = '10px';
-                  msgDiv.style.backgroundColor = '#d4edda';
-                  msgDiv.style.color = '#155724';
-                  msgDiv.style.padding = '10px';
-                  msgDiv.style.borderRadius = '5px';
-                  document.body.appendChild(msgDiv);
-                }
-                msgDiv.style.display = 'block';
-                msgDiv.innerHTML = data.message;
-                if(flashTimeout) {
-                  clearTimeout(flashTimeout);
-                }
-                flashTimeout = setTimeout(function(){
-                  msgDiv.style.display = 'none';
-                }, 3000);
+    document.querySelectorAll('.inline-upload').forEach(function(input) {
+      input.addEventListener('change', function() {
+        var file = input.files[0];
+        if(file) {
+          var rm = input.getAttribute('data-rm');
+          var formData = new FormData();
+          formData.append('rm', rm);
+          formData.append('foto_file', file);
+          
+          fetch('/upload_inline_foto', {
+            method: 'POST',
+            body: formData
+          })
+          .then(response => response.json())
+          .then(data => {
+            if(data.url) {
+              var uploadable = document.querySelector('.uploadable[data-rm="'+rm+'"]');
+              if(uploadable.tagName.toLowerCase() === 'img') {
+                uploadable.src = data.url;
               } else {
-                alert("Erro ao fazer upload: " + (data.error || "Erro desconhecido"));
+                var img = document.createElement('img');
+                img.src = data.url;
+                img.alt = "Foto";
+                img.className = "foto uploadable";
+                img.setAttribute('data-rm', rm);
+                uploadable.parentNode.replaceChild(img, uploadable);
               }
-            })
-            .catch(error => {
-              console.error('Erro:', error);
-              alert("Erro no upload da foto.");
-            });
-          }
-        });
+              var msgDiv = document.getElementById('upload-success');
+              if(!msgDiv){
+                msgDiv = document.createElement('div');
+                msgDiv.id = 'upload-success';
+                msgDiv.style.position = 'fixed';
+                msgDiv.style.top = '0.2cm';
+                msgDiv.style.right = '0.2cm';
+                msgDiv.style.backgroundColor = '#d4edda';
+                msgDiv.style.color = '#155724';
+                msgDiv.style.padding = '0.2cm';
+                msgDiv.style.borderRadius = '0.2cm';
+                document.body.appendChild(msgDiv);
+              }
+              msgDiv.style.display = 'block';
+              msgDiv.innerHTML = data.message;
+              if(flashTimeout) {
+                clearTimeout(flashTimeout);
+              }
+              flashTimeout = setTimeout(function(){
+                msgDiv.style.display = 'none';
+              }, 3000);
+            } else {
+              alert("Erro ao fazer upload: " + (data.error || "Erro desconhecido"));
+            }
+          })
+          .catch(error => {
+            console.error('Erro:', error);
+            alert("Erro no upload da foto.");
+          });
+        }
       });
     });
-  </script>
+  });
+</script>
 </body>
 </html>
 """
     return html_content
 
-@app.route('/login', methods=['GET', 'POST'])
+@app.route('/login', methods=['GET', 'POST']) 
 def login():
     error = None
     if request.method == 'POST':
@@ -736,7 +739,7 @@ def login():
     '''
     return render_template_string(login_html, error=error)
 
-@app.route('/logout')
+@app.route('/logout') 
 def logout():
     session.clear()
     return redirect(url_for('login'))
@@ -749,10 +752,8 @@ def index():
             file = request.files['excel_file']
             if file.filename == '':
                 return "Nenhum arquivo selecionado", 400
-            # Exibe uma mensagem de loading ao clicar em "Gerar Carteirinhas"
             flash("Gerando carteirinhas. Aguarde...", "info")
             html_result = gerar_html_carteirinhas(file)
-            # Após gerar, adicione uma mensagem de sucesso via JS no template gerado (veja o overlay no código acima)
             return html_result
     index_html = '''
     <!doctype html>
@@ -836,9 +837,8 @@ def index():
           .multi-upload-group {
             margin-bottom: 15px;
           }
-          /* Oculta as mensagens flash após 3 segundos */
           #flash-messages {
-            position: fixed;
+            position: relative;
             top: 10px;
             left: 50%;
             transform: translateX(-50%);
@@ -911,7 +911,6 @@ def index():
         <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/js/bootstrap.bundle.min.js"></script>
         <script>
-          // Remove as mensagens flash após 3 segundos
           setTimeout(function(){
             var flashDiv = document.getElementById('flash-messages');
             if(flashDiv){
@@ -919,31 +918,47 @@ def index():
             }
           }, 3000);
           
-          function showLoading(){
-            // Exibe uma sobreposição de loading para geração de carteirinhas
-            var loadingOverlay = document.createElement('div');
-            loadingOverlay.id = 'loading-overlay';
-            loadingOverlay.style.position = 'fixed';
-            loadingOverlay.style.top = '0';
-            loadingOverlay.style.left = '0';
-            loadingOverlay.style.right = '0';
-            loadingOverlay.style.bottom = '0';
-            loadingOverlay.style.background = 'rgba(0,0,0,0.5)';
-            loadingOverlay.style.display = 'flex';
-            loadingOverlay.style.alignItems = 'center';
-            loadingOverlay.style.justifyContent = 'center';
-            loadingOverlay.style.zIndex = '9999';
-            loadingOverlay.innerHTML = `
-              <div style="text-align: center; color: white;">
-                <div class="spinner-border" role="status">
-                  <span class="sr-only">Carregando...</span>
-                </div>
-                <p>Carregando carteirinhas...</p>
-              </div>
-            `;
-            document.body.appendChild(loadingOverlay);
+        function showLoading() {
+          var existingOverlay = document.getElementById('loading-overlay');
+          if (existingOverlay) {
+            existingOverlay.remove();
           }
-          
+          var loadingOverlay = document.createElement('div');
+          loadingOverlay.id = 'loading-overlay';
+          loadingOverlay.style.position = 'fixed';
+          loadingOverlay.style.top = '0';
+          loadingOverlay.style.left = '0';
+          loadingOverlay.style.right = '0';
+          loadingOverlay.style.bottom = '0';
+          loadingOverlay.style.background = 'rgba(0,0,0,0.5)';
+          loadingOverlay.style.display = 'flex';
+          loadingOverlay.style.alignItems = 'center';
+          loadingOverlay.style.justifyContent = 'center';
+          loadingOverlay.style.zIndex = '9999';
+          loadingOverlay.innerHTML = `
+            <div style="text-align: center; color: white; font-family: Arial, sans-serif;">
+              <svg width="3.0cm" height="4.5cm" viewBox="0 0 6.0 9.0" xmlns="http://www.w3.org/2000/svg">
+                <rect x="0.3" y="0.3" width="5.4" height="8.4" rx="0.3" ry="0.3" stroke="white" stroke-width="0.1" fill="none" />
+                <rect id="badge-fill" x="0.3" y="8.7" width="5.4" height="0" rx="0.3" ry="0.3" fill="white" />
+              </svg>
+              <p style="margin-top: 0.2cm;">Gerando carteirinhas...</p>
+            </div>
+          `;
+          document.body.appendChild(loadingOverlay);
+          let fillHeight = 0;
+          const maxHeight = 8.4;
+          const interval = setInterval(() => {
+            fillHeight += 0.2;
+            if (fillHeight > maxHeight) {
+              fillHeight = maxHeight;
+              clearInterval(interval);
+            }
+            const badgeFill = document.getElementById('badge-fill');
+            badgeFill.setAttribute('y', 8.7 - fillHeight);
+            badgeFill.setAttribute('height', fillHeight);
+          }, 100);
+        }
+    
           document.getElementById('show-multi-upload').addEventListener('click', function() {
             var section = document.getElementById('multi-upload-section');
             if(section.style.display === 'none') {
