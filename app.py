@@ -207,8 +207,8 @@ def gerar_html_carteirinhas(arquivo_excel):
         margin: 0;
         padding: 0;
         display: flex;
-        align-items: stretch;
-        justify-content: center;
+        flex-direction: column;
+        height: 100vh;
       }
       .carteirinhas-container {
         width: 100%;
@@ -239,6 +239,18 @@ def gerar_html_carteirinhas(arquivo_excel):
       .status { height: 0.6cm; line-height: 0.6cm; text-align: center; }
       .foto { width: 1.8cm; height: 1.8cm; border: 0.1cm solid #2196F3; object-fit: cover; }
       .info { margin-top: 0.1cm; }
+      footer.declaration-footer {
+        display: block;
+        text-align: center;
+        font-size: 0.9em;
+        border-top: 1px solid #ccc;
+        padding: 15px 0;
+        margin-top: 0;
+      }
+      .signature {
+        text-align: center;
+        margin-top: auto;
+      }
       @page {
         size: A4 portrait;
         margin: 5mm;
@@ -251,16 +263,6 @@ def gerar_html_carteirinhas(arquivo_excel):
         page-break-after: always;
       }
       .printable-declaration:last-child { page-break-after: auto; }
-      /* Aumentamos o deslocamento da assinatura e do rodapé na impressão */
-      .signature { margin-top: 1.5cm; }
-      footer.declaration-footer {
-        display: block;
-        text-align: center;
-        font-size: 0.9em;
-        border-top: 1px solid #ccc;
-        padding: 15px 0;
-        margin-top: 1.5cm;
-      }
     }
     .imprimir-carteirinhas {
       position: fixed;
@@ -329,7 +331,6 @@ def gerar_html_carteirinhas(arquivo_excel):
       background: none;
       cursor: pointer;
     }
-    .declaration-footer { display: none; }
   </style>
 </head>
 <body>
@@ -767,7 +768,7 @@ def gerar_declaracao_escolar(file_path, rm, tipo):
         declaracao_text = (
             f"Declaro, para os devidos fins, que o(a) aluno(a) <strong><u>{nome}</u></strong>, "
             f"portador(a) do RA <strong><u>{ra}</u></strong>, nascido(a) em <strong><u>{data_nasc}</u></strong>, "
-            f"encontra-se regularmente matriculado(a) na E.M José Padin Mouta, cursando atualmente a "
+            f"encontra-se regularmente matriculado(a) na E.M José Padin Mouta, cursando atualmente o "
             f"<strong><u>{serie}</u></strong>."
         )
         titulo = "Declaração de Escolaridade"
@@ -781,17 +782,19 @@ def gerar_declaracao_escolar(file_path, rm, tipo):
       font-family: Arial, sans-serif;
       margin: 2cm;
       display: flex;
+      font-size: 18px;
       flex-direction: column;
       min-height: 100vh;
     }}
     .content {{
-      margin-top: 2cm;
+      margin-top: 3cm;
       text-align: justify;
       line-height: 1.5;
+      flex: 1;
     }}
     .signature {{
       text-align: center;
-      margin-top: 1.5cm;
+      margin-top: auto;
     }}
     .signature p.line {{
       margin-bottom: 0.5cm;
@@ -800,13 +803,27 @@ def gerar_declaracao_escolar(file_path, rm, tipo):
       footer.declaration-footer {{ display: none; }}
     }}
     @media print {{
+      body {{
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        margin: 0;
+        padding: 0;
+      }}
+      .content {{
+        flex: 1;
+      }}
+      .signature {{
+        text-align: center;
+        margin-top: auto;
+      }}
       footer.declaration-footer {{
         display: block;
         text-align: center;
         font-size: 0.9em;
         border-top: 1px solid #ccc;
         padding: 15px 0;
-        margin-top: 1.5cm;
+        margin-top: 0;
       }}
       .no-print {{ display: none !important; }}
     }}
@@ -832,10 +849,11 @@ def gerar_declaracao_escolar(file_path, rm, tipo):
         declaracao_text = (
             f"Declaro, para os devidos fins, que o(a) aluno(a) <strong><u>{nome}</u></strong>, "
             f"portador(a) do RA <strong><u>{ra}</u></strong>, nascido(a) em <strong><u>{data_nasc}</u></strong>, "
-            f"solicitou transferência de nossa unidade escolar na data de <strong><u>{data_extenso}</u></strong>, "
-            f"estando apto(a) a cursar a <strong><u>{serie}</u></strong>."
+            f"solicitou transferência de nossa unidade escolar na data de hoje "
+            f"estando apto(a) a cursar o <strong><u>{serie}</u></strong>."
         )
         titulo = "Declaração de Transferência"
+        # Correção aplicada: estrutura similar à declaração de escolaridade, com layout flex e assinatura empurrada para o final.
         html_declaracao = f"""<!doctype html>
 <html lang="pt-br">
 <head>
@@ -844,26 +862,21 @@ def gerar_declaracao_escolar(file_path, rm, tipo):
   <style>
     body {{
       font-family: Arial, sans-serif;
-      margin: 0;
-      padding: 2cm;
+      margin: 2cm;
       display: flex;
+      font-size: 18px;
       flex-direction: column;
       min-height: 100vh;
     }}
-    .printable-declaration {{
-      display: flex;
-      flex-direction: column;
-      flex: 1;
-      page-break-after: always;
-    }}
     .content {{
-      margin-top: 2cm;
+      flex: 1;
       text-align: justify;
       line-height: 1.5;
+      margin-top: 3cm;
     }}
     .signature {{
       text-align: center;
-      margin-top: 1.5cm;
+      margin-top: auto;
     }}
     .signature p.line {{
       margin-bottom: 0.5cm;
@@ -872,50 +885,44 @@ def gerar_declaracao_escolar(file_path, rm, tipo):
       footer.declaration-footer {{ display: none; }}
     }}
     @media print {{
+      body {{
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        margin: 0;
+        padding: 0;
+      }}
+      .content {{
+        flex: 1;
+      }}
+      .signature {{
+        text-align: center;
+        margin-top: auto;
+      }}
       footer.declaration-footer {{
         display: block;
         text-align: center;
         font-size: 0.9em;
         border-top: 1px solid #ccc;
         padding: 15px 0;
-        margin-top: 1.5cm;
+        margin-top: 0;
       }}
       .no-print {{ display: none !important; }}
-      .printable-declaration {{
-        page-break-after: always;
-      }}
-      .printable-declaration:last-child {{
-        page-break-after: auto;
-      }}
     }}
     {additional_css}
   </style>
 </head>
 <body>
-  <div class="printable-declaration">
-    {header_html}
-    <div class="content">
-      <p>{declaracao_text}</p>
-    </div>
-    <div class="signature">
-      <p class="line">__________________________________</p>
-      <p>Luciana Rocha Augustinho</p>
-      <p>Diretora da Unidade Escolar</p>
-    </div>
-    {footer_html}
+  {header_html}
+  <div class="content">
+    <p>{declaracao_text}</p>
   </div>
-  <div class="printable-declaration">
-    {header_html}
-    <div class="content">
-      <p>{declaracao_text}</p>
-    </div>
-    <div class="signature">
-      <p class="line">__________________________________</p>
-      <p>Luciana Rocha Augustinho</p>
-      <p>Diretora da Unidade Escolar</p>
-    </div>
-    {footer_html}
+  <div class="signature">
+    <p class="line">__________________________________</p>
+    <p>Luciana Rocha Augustinho</p>
+    <p>Diretora da Unidade Escolar</p>
   </div>
+  {footer_html}
   {print_button_html}
 </body>
 </html>
@@ -947,13 +954,15 @@ def gerar_declaracao_escolar(file_path, rm, tipo):
       min-height: 100vh;
     }}
     .content {{
-      margin-top: 2cm;
+      margin-top: 3cm;
       text-align: justify;
       line-height: 1.5;
+      font-size: 18px;
+      flex: 1;
     }}
     .signature {{
       text-align: center;
-      margin-top: 1.5cm;
+      margin-top: auto;
     }}
     .signature p.line {{
       margin-bottom: 0.5cm;
@@ -962,13 +971,27 @@ def gerar_declaracao_escolar(file_path, rm, tipo):
       footer.declaration-footer {{ display: none; }}
     }}
     @media print {{
+      body {{
+        display: flex;
+        flex-direction: column;
+        height: 100vh;
+        margin: 0;
+        padding: 0;
+      }}
+      .content {{
+        flex: 1;
+      }}
+      .signature {{
+        text-align: center;
+        margin-top: auto;
+      }}
       footer.declaration-footer {{
         display: block;
         text-align: center;
         font-size: 0.9em;
         border-top: 1px solid #ccc;
         padding: 15px 0;
-        margin-top: 1.5cm;
+        margin-top: 0;
       }}
       .no-print {{ display: none !important; }}
     }}
