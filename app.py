@@ -1,6 +1,9 @@
-from flask import Flask, request, redirect, url_for, render_template_string, jsonify, session, flash 
+from flask import Flask, request, redirect, url_for, render_template_string, jsonify, session, flash
 import pandas as pd
 import os
+import uuid
+import re
+from datetime import datetime
 from io import BytesIO
 from werkzeug.utils import secure_filename
 from functools import wraps
@@ -11,7 +14,7 @@ ACCESS_TOKEN = "minha_senha"  # Token de acesso
 
 app.config['UPLOAD_FOLDER'] = 'uploads'
 
-# Lista de extensões permitidas
+# Lista de extensões permitidas para fotos
 ALLOWED_EXTENSIONS = {'.jpg', '.jpeg', '.png', '.bmp', '.gif'}
 
 # Cria os diretórios necessários, se não existirem
@@ -37,17 +40,17 @@ def gerar_html_carteirinhas(arquivo_excel):
     dados = planilha[['RM', 'NOME', 'DATA NASC.', 'RA', 'SAI SOZINHO?', 'SÉRIE', 'HORÁRIO']]
     dados['RM'] = dados['RM'].fillna(0).astype(int)
     
-    # HTML para geração das carteirinhas com dimensões de 9.0cm (altura) x 6.0cm (largura)
+    alunos_sem_fotos_list = []
     html_content = """
 <!DOCTYPE html>
 <html lang="pt-br">
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Carteirinhas</title>
+  <title>Carteirinhas - E.M José Padin Mouta</title>
   <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
   <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
- <style>
+  <style>
     body {
       font-family: 'Montserrat', sans-serif;
       margin: 0;
@@ -58,7 +61,7 @@ def gerar_html_carteirinhas(arquivo_excel):
       align-items: center;
     }
     #search-container {
-      margin-bottom: 20px;
+      margin-top: 10px;
     }
     #localizarAluno {
       padding: 0.2cm;
@@ -220,10 +223,6 @@ def gerar_html_carteirinhas(arquivo_excel):
       justify-content: center;
       z-index: 9999;
     }
-    #loading-overlay .spinner-border {
-      width: 3rem;
-      height: 3rem;
-    }
     #cards-success {
       display: none;
       position: fixed;
@@ -236,7 +235,11 @@ def gerar_html_carteirinhas(arquivo_excel):
       border-radius: 0.2cm;
       z-index: 10000;
     }
+    .no-print {
+      /* Elementos com esta classe não serão impressos */
+    }
     @media print {
+      .no-print { display: none !important; }
       body {
         background-color: #fff;
         margin: 0;
@@ -295,6 +298,25 @@ def gerar_html_carteirinhas(arquivo_excel):
       .imprimir-carteirinhas, .imprimir-pagina {
         display: none !important;
       }
+      .signature {
+        position: fixed;
+        bottom: 1.5cm; /* Valor ajustado para subir a assinatura */
+        left: 0;
+        right: 0;
+        text-align: center;
+      }
+      .declaration-footer {
+        display: block;
+        position: fixed;
+        bottom: 0;
+        left: 0;
+        width: 100%;
+        text-align: center;
+        font-size: 0.9em;
+        border-top: 1px solid #ccc;
+        padding-top: 15px;
+        padding-bottom: 10px;
+      }
     }
     .imprimir-carteirinhas {
       position: fixed;
@@ -321,6 +343,19 @@ def gerar_html_carteirinhas(arquivo_excel):
     .imprimir-pagina:hover {
       background-color: #FF7043;
     }
+    .alunos-sem-fotos-btn {
+      background-color: #4B79A1;
+      color: #fff;
+      border: none;
+      padding: 0.2cm 0.5cm;
+      font-size: 0.3cm;
+      border-radius: 0.2cm;
+      cursor: pointer;
+      margin-bottom: 0.2cm;
+    }
+    .alunos-sem-fotos-btn:hover {
+      background-color: #3a5d78;
+    }
     @media screen {
       .page {
         border: 0.05cm dashed #ccc;
@@ -332,6 +367,46 @@ def gerar_html_carteirinhas(arquivo_excel):
       transform: scale(1.05);
       transition: all 0.3s ease;
       cursor: pointer;
+    }
+    #relatorio-container {
+      display: none;
+      position: fixed;
+      top: 10%;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 80%;
+      max-height: 80%;
+      overflow-y: auto;
+      background: #fff;
+      border: 1px solid #ccc;
+      border-radius: 10px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.5);
+      z-index: 10000;
+      padding: 20px;
+    }
+    #relatorio-container h2 {
+      text-align: center;
+      margin-top: 0;
+    }
+    #relatorio-container table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+    #relatorio-container th, #relatorio-container td {
+      border: 1px solid #ccc;
+      padding: 8px;
+      text-align: left;
+    }
+    #relatorio-container button.close-relatorio {
+      float: right;
+      font-size: 1.2em;
+      border: none;
+      background: none;
+      cursor: pointer;
+    }
+    /* Rodapé oculto na tela, exibido somente na impressão */
+    .declaration-footer {
+      display: none;
     }
   </style>
 </head>
@@ -346,7 +421,10 @@ def gerar_html_carteirinhas(arquivo_excel):
   </div>
   <div id="cards-success">Carteirinhas geradas com sucesso</div>
   <div class="carteirinhas-container">
-    <button class="imprimir-carteirinhas" onclick="imprimirCarteirinhas()">Imprimir Carteirinhas</button>
+    <div class="no-print" style="margin-bottom: 10px;">
+      <button class="alunos-sem-fotos-btn" onclick="mostrarRelatorioAlunosSemFotos()">Alunos sem fotos</button>
+      <button class="imprimir-carteirinhas" onclick="imprimirCarteirinhas()">Imprimir Carteirinhas</button>
+    </div>
     <div id="search-container">
       <input type="text" id="localizarAluno" placeholder="Localizar Aluno">
     </div>
@@ -396,10 +474,16 @@ def gerar_html_carteirinhas(arquivo_excel):
                 found_photo = f"/static/fotos/{rm}{ext}"
                 break
         
+        if not found_photo:
+            alunos_sem_fotos_list.append({
+                'rm': rm,
+                'nome': nome,
+                'serie': serie
+            })
+        
         if found_photo:
             foto_tag = f'<img src="{found_photo}" alt="Foto" class="foto uploadable" data-rm="{rm}">'
         else:
-            # O ícone da câmera fica acima do texto, ambos centralizados
             foto_tag = f'''
             <div class="foto uploadable" data-rm="{rm}" style="display: flex; flex-direction: column; align-items: center; justify-content: center;">
               <span style="font-size:0.8cm; opacity:0.5; color: grey; margin-bottom: 0.1cm;">&#128247;</span>
@@ -458,14 +542,34 @@ def gerar_html_carteirinhas(arquivo_excel):
     if contador % 4 != 0:
         html_content += '</div></div>'
     
-    html_content += """
+    relatorio_linhas = ""
+    for aluno in alunos_sem_fotos_list:
+        relatorio_linhas += f"<tr><td>{aluno['rm']}</td><td>{aluno['nome']}</td><td>{aluno['serie']}</td></tr>"
+    
+    html_content += f"""
+  </div>
+  <div id="relatorio-container" class="no-print">
+    <button class="close-relatorio" onclick="fecharRelatorio()">&times;</button>
+    <h2>Alunos sem Fotos</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>RM</th>
+          <th>Nome</th>
+          <th>Série</th>
+        </tr>
+      </thead>
+      <tbody>
+        {relatorio_linhas}
+      </tbody>
+    </table>
   </div>
   <script>
-  function showLoading() {
+  function showLoading() {{
     var existingOverlay = document.getElementById('loading-overlay');
-    if (existingOverlay) {
+    if (existingOverlay) {{
       existingOverlay.remove();
-    }
+    }}
   
     var loadingOverlay = document.createElement('div');
     loadingOverlay.id = 'loading-overlay';
@@ -494,116 +598,124 @@ def gerar_html_carteirinhas(arquivo_excel):
   
     let fillHeight = 0;
     const maxHeight = 8.4; 
-    function animateBadge() {
+    function animateBadge() {{
       fillHeight += 0.2;
-      if (fillHeight > maxHeight) {
+      if (fillHeight > maxHeight) {{
         fillHeight = 0;
-      }
+      }}
       const badgeFill = document.getElementById('badge-fill');
       badgeFill.setAttribute('y', 8.7 - fillHeight);
       badgeFill.setAttribute('height', fillHeight);
-    }
+    }}
   
     var animationId = setInterval(animateBadge, 100);
     loadingOverlay.dataset.animationId = animationId;
-  }
+  }}
   
   showLoading();
   
-  window.onload = function(){
+  window.onload = function() {{
     var overlay = document.getElementById('loading-overlay');
-    if (overlay) {
+    if (overlay) {{
       var animationId = Number(overlay.dataset.animationId);
       clearInterval(animationId);
       overlay.style.display = 'none';
-    }
+    }}
     var cardsMsg = document.getElementById('cards-success');
-    if (cardsMsg) {
+    if (cardsMsg) {{
       cardsMsg.style.display = 'block';
       cardsMsg.innerHTML = 'Carteirinhas geradas com sucesso!';
-      setTimeout(function(){
+      setTimeout(function() {{
         cardsMsg.style.display = 'none';
-      }, 3000);
-    }
-  };
+      }}, 3000);
+    }}
+  }};
   
-  function imprimirCarteirinhas() {
+  function imprimirCarteirinhas() {{
     window.print();
-  }
+  }}
   
-  function imprimirPagina(botao) {
+  function imprimirPagina(botao) {{
     let pagina = botao.closest('.page');
     let todasPaginas = document.querySelectorAll('.page');
-    todasPaginas.forEach(p => {
-      if (p !== pagina) {
+    todasPaginas.forEach(p => {{
+      if (p !== pagina) {{
         p.style.display = 'none';
-      }
-    });
-    setTimeout(() => {
+      }}
+    }});
+    setTimeout(() => {{
       window.print();
-      todasPaginas.forEach(p => {
+      todasPaginas.forEach(p => {{
         p.style.display = '';
-      });
-    }, 100);
-  }
+      }});
+    }}, 100);
+  }}
   
-  document.getElementById('localizarAluno').addEventListener('keyup', function() {
+  function mostrarRelatorioAlunosSemFotos() {{
+    document.getElementById('relatorio-container').style.display = 'block';
+  }}
+  
+  function fecharRelatorio() {{
+    document.getElementById('relatorio-container').style.display = 'none';
+  }}
+  
+  document.getElementById('localizarAluno').addEventListener('keyup', function() {{
     var filtro = this.value.toLowerCase();
     var cards = document.querySelectorAll('.borda-pontilhada');
-    cards.forEach(function(card) {
+    cards.forEach(function(card) {{
       var nomeElem = card.querySelector('.linha-nome .descricao');
-      if (nomeElem) {
+      if (nomeElem) {{
         var nome = nomeElem.textContent.toLowerCase();
-        if (nome.indexOf(filtro) > -1) {
+        if (nome.indexOf(filtro) > -1) {{
           card.style.display = '';
-        } else {
+        }} else {{
           card.style.display = 'none';
-        }
-      }
-    });
-  });
+        }}
+      }}
+    }});
+  }});
   
   var flashTimeout = null;
-  document.addEventListener('DOMContentLoaded', function() {
-    document.querySelectorAll('.uploadable').forEach(function(element) {
-      element.addEventListener('click', function() {
+  document.addEventListener('DOMContentLoaded', function() {{
+    document.querySelectorAll('.uploadable').forEach(function(element) {{
+      element.addEventListener('click', function() {{
         var rm = element.getAttribute('data-rm');
         var input = document.querySelector('.inline-upload[data-rm="'+rm+'"]');
-        if(input) {
+        if(input) {{
           input.click();
-        }
-      });
-    });
+        }}
+      }});
+    }});
     
-    document.querySelectorAll('.inline-upload').forEach(function(input) {
-      input.addEventListener('change', function() {
+    document.querySelectorAll('.inline-upload').forEach(function(input) {{
+      input.addEventListener('change', function() {{
         var file = input.files[0];
-        if(file) {
+        if(file) {{
           var rm = input.getAttribute('data-rm');
           var formData = new FormData();
           formData.append('rm', rm);
           formData.append('foto_file', file);
           
-          fetch('/upload_inline_foto', {
+          fetch('/upload_inline_foto', {{
             method: 'POST',
             body: formData
-          })
+          }})
           .then(response => response.json())
-          .then(data => {
-            if(data.url) {
+          .then(data => {{
+            if(data.url) {{
               var uploadable = document.querySelector('.uploadable[data-rm="'+rm+'"]');
-              if(uploadable.tagName.toLowerCase() === 'img') {
+              if(uploadable.tagName.toLowerCase() === 'img') {{
                 uploadable.src = data.url;
-              } else {
+              }} else {{
                 var img = document.createElement('img');
                 img.src = data.url;
                 img.alt = "Foto";
                 img.className = "foto uploadable";
                 img.setAttribute('data-rm', rm);
                 uploadable.parentNode.replaceChild(img, uploadable);
-              }
+              }}
               var msgDiv = document.getElementById('upload-success');
-              if(!msgDiv){
+              if(!msgDiv) {{
                 msgDiv = document.createElement('div');
                 msgDiv.id = 'upload-success';
                 msgDiv.style.position = 'fixed';
@@ -614,32 +726,327 @@ def gerar_html_carteirinhas(arquivo_excel):
                 msgDiv.style.padding = '0.2cm';
                 msgDiv.style.borderRadius = '0.2cm';
                 document.body.appendChild(msgDiv);
-              }
+              }}
               msgDiv.style.display = 'block';
               msgDiv.innerHTML = data.message;
-              if(flashTimeout) {
+              if(flashTimeout) {{
                 clearTimeout(flashTimeout);
-              }
-              flashTimeout = setTimeout(function(){
+              }}
+              flashTimeout = setTimeout(function() {{
                 msgDiv.style.display = 'none';
-              }, 3000);
-            } else {
+              }}, 3000);
+            }} else {{
               alert("Erro ao fazer upload: " + (data.error || "Erro desconhecido"));
-            }
-          })
-          .catch(error => {
+            }}
+          }})
+          .catch(error => {{
             console.error('Erro:', error);
             alert("Erro no upload da foto.");
-          });
-        }
-      });
-    });
-  });
-</script>
+          }});
+        }}
+      }});
+    }});
+  }});
+  </script>
 </body>
 </html>
 """
-    return html_content
+    return render_template_string(html_content)
+
+def gerar_declaracao_escolar(file_path, rm, tipo):
+    planilha = pd.read_excel(file_path, sheet_name='LISTA CORRIDA')
+    # Função para converter o RM para inteiro em string
+    def format_rm(x):
+        try:
+            return str(int(float(x)))
+        except:
+            return str(x)
+    planilha['RM_str'] = planilha['RM'].apply(format_rm)
+    try:
+        rm_num = str(int(float(rm)))
+    except:
+        rm_num = str(rm)
+    aluno = planilha[planilha['RM_str'] == rm_num]
+    if aluno.empty:
+        return None  # Aluno não encontrado
+    row = aluno.iloc[0]
+    nome = row['NOME']
+    serie = row['SÉRIE']
+    # Formata a série: insere " ano " entre o ordinal e a letra (ex: "2ºA" -> "2º ano A")
+    if isinstance(serie, str):
+        serie = re.sub(r"(\d+º)([A-Za-z])", r"\1 ano \2", serie)
+    data_nasc = row['DATA NASC.']
+    ra = row['RA']
+    if pd.notna(data_nasc):
+        try:
+            data_nasc = pd.to_datetime(data_nasc, errors='coerce')
+            if pd.notna(data_nasc):
+                data_nasc = data_nasc.strftime('%d/%m/%Y')
+            else:
+                data_nasc = "Desconhecida"
+        except Exception as e:
+            data_nasc = "Desconhecida"
+    else:
+        data_nasc = "Desconhecida"
+    
+    current_date = datetime.now().strftime("%d/%m/%Y")
+    
+    # Botão de impressão (oculto na impressão)
+    print_button_html = '''
+    <div class="no-print" style="text-align: center; margin-top: 20px;">
+      <button onclick="window.print()" class="print-button">Imprimir Declaração</button>
+    </div>
+    '''
+    # CSS adicional comum, incluindo regras para impressão do rodapé
+    additional_css = '''
+.print-button {
+  background-color: #283E51;
+  color: #fff;
+  border: none;
+  padding: 10px 20px;
+  border-radius: 5px;
+  cursor: pointer;
+  margin-top: 20px;
+}
+.print-button:hover {
+  background-color: #1d2d3a;
+}
+.declaration-footer {
+  display: none;
+}
+@media print {
+  .no-print { display: none !important; }
+  .signature {
+    position: fixed;
+    bottom: 5cm;
+    left: 0;
+    right: 0;
+    text-align: center;
+  }
+  .declaration-footer {
+    display: block;
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    width: 100%;
+    text-align: center;
+    font-size: 0.9em;
+    border-top: 1px solid #ccc;
+    padding-top: 15px;
+    padding-bottom: 10px;
+  }
+  .printable-declaration {
+    page-break-after: always;
+  }
+}
+'''
+    # Rodapé com as informações (sem o nome da escola)
+    footer_html = '''
+    <footer class="declaration-footer">
+      <p>Rua: Bororós, nº 150, Vila Tupi, Praia Grande - SP, CEP: 11703-390</p>
+      <p>Telefone: 3496-5321 | E-mail: em.padin@praiagrande.sp.gov.br</p>
+    </footer>
+    '''
+    if tipo == "Escolaridade":
+        declaracao_text = (
+            f"Declaro, para os devidos fins, que o(a) aluno(a) <strong><u>{nome}</u></strong>, "
+            f"portador(a) do RA <strong><u>{ra}</u></strong>, nascido(a) em <strong><u>{data_nasc}</u></strong>, "
+            f"encontra-se regularmente matriculado(a) na E.M José Padin Mouta, cursando atualmente a "
+            f"<strong><u>{serie}</u></strong>."
+        )
+        titulo = "Declaração de Escolaridade"
+        html_declaracao = f"""
+        <!doctype html>
+        <html lang="pt-br">
+        <head>
+          <meta charset="utf-8">
+          <title>{titulo} - E.M José Padin Mouta</title>
+          <style>
+            body {{
+              font-family: Arial, sans-serif;
+              margin: 2cm;
+            }}
+            .header {{
+              text-align: center;
+            }}
+            .header .school-name {{
+              font-weight: bold;
+              font-size: 1.2em;
+            }}
+            .header .date {{
+              text-align: left;
+              margin: 0;
+            }}
+            .content {{
+              margin-top: 2cm;
+              text-align: justify;
+              line-height: 1.5;
+            }}
+            .signature {{
+              text-align: center;
+              margin-top: 30px;
+            }}
+            .signature .line {{
+              margin-bottom: 5px;
+            }}
+            {additional_css}
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h2>{titulo}</h2>
+            <p class="school-name">E.M José Padin Mouta</p>
+            <p class="date" style="text-align: left;">Data: {current_date}</p>
+          </div>
+          <div class="content">
+            <p>{declaracao_text}</p>
+          </div>
+          <div class="signature">
+            <p class="line">__________________________________</p>
+            <p>Luciana Rocha Augustinho</p>
+            <p>Diretora da Unidade Escolar</p>
+          </div>
+          {print_button_html}
+          {footer_html}
+        </body>
+        </html>
+        """
+    elif tipo == "Transferencia":
+        declaracao_text = (
+            f"Declaro, para os devidos fins, que o(a) aluno(a) <strong><u>{nome}</u></strong>, "
+            f"portador(a) do RA <strong><u>{ra}</u></strong>, nascido(a) em <strong><u>{data_nasc}</u></strong>, "
+            f"solicitou transferência de nossa unidade escolar na data de <strong><u>{current_date}</u></strong>, "
+            f"estando apto(a) a cursar a <strong><u>{serie}</u></strong>."
+        )
+        titulo = "Declaração de Transferência"
+        # Cabeçalho centralizado com data à esquerda
+        declaration_content = f"""
+         <div class="header" style="text-align: center;">
+           <h2>{titulo}</h2>
+           <p class="school-name" style="text-align: center;">E.M José Padin Mouta</p>
+           <p class="date" style="text-align: left;">Data: {current_date}</p>
+         </div>
+         <div class="content">
+           <p>{declaracao_text}</p>
+         </div>
+         <div class="signature" style="margin-top: 30px;">
+           <p class="line">__________________________________</p>
+           <p>Luciana Rocha Augustinho</p>
+           <p>Diretora da Unidade Escolar</p>
+         </div>
+        """
+        html_declaracao = f"""
+        <!doctype html>
+        <html lang="pt-br">
+        <head>
+          <meta charset="utf-8">
+          <title>{titulo} - E.M José Padin Mouta</title>
+          <style>
+            body {{
+              font-family: Arial, sans-serif;
+              margin: 2cm;
+            }}
+            {additional_css}
+          </style>
+        </head>
+        <body>
+          <div class="printable-declaration">
+            {declaration_content}
+            {footer_html}
+          </div>
+          <div class="printable-declaration">
+            {declaration_content}
+            {footer_html}
+          </div>
+          {print_button_html}
+        </body>
+        </html>
+        """
+    elif tipo == "Conclusão":
+        match = re.search(r"(\d+)º\s*ano", serie)
+        if match:
+            next_year = int(match.group(1)) + 1
+            series_text = f"{next_year}º ano"
+        else:
+            series_text = "a série subsequente"
+        declaracao_text = (
+            f"Declaro, para os devidos fins, que o(a) aluno(a) <strong><u>{nome}</u></strong>, "
+            f"portador(a) do RA <strong><u>{ra}</u></strong>, nascido(a) em <strong><u>{data_nasc}</u></strong>, "
+            f"concluiu com êxito o <strong><u>{serie}</u></strong>, estando apto(a) a ingressar no <strong><u>{series_text}</u></strong>."
+        )
+        titulo = "Declaração de Conclusão"
+        html_declaracao = f"""
+        <!doctype html>
+        <html lang="pt-br">
+        <head>
+          <meta charset="utf-8">
+          <title>{titulo} - E.M José Padin Mouta</title>
+          <style>
+            body {{
+              font-family: Arial, sans-serif;
+              margin: 2cm;
+            }}
+            .header {{
+              text-align: center;
+            }}
+            .header .school-name {{
+              font-weight: bold;
+              font-size: 1.2em;
+            }}
+            .header .date {{
+              text-align: left;
+              margin: 0;
+            }}
+            .content {{
+              margin-top: 2cm;
+              text-align: justify;
+              line-height: 1.5;
+            }}
+            .signature {{
+              text-align: center;
+              margin-top: 30px;
+            }}
+            .signature .line {{
+              margin-bottom: 5px;
+            }}
+            {additional_css}
+          </style>
+        </head>
+        <body>
+          <div class="header">
+            <h2>{titulo}</h2>
+            <p class="school-name">E.M José Padin Mouta</p>
+            <p class="date" style="text-align: left;">Data: {current_date}</p>
+          </div>
+          <div class="content">
+            <p>{declaracao_text}</p>
+          </div>
+          <div class="signature">
+            <p class="line">__________________________________</p>
+            <p>Luciana Rocha Augustinho</p>
+            <p>Diretora da Unidade Escolar</p>
+          </div>
+          {print_button_html}
+          {footer_html}
+        </body>
+        </html>
+        """
+    else:
+        declaracao_text = "Tipo de declaração inválido."
+        titulo = "Declaração"
+        html_declaracao = f"""
+        <!doctype html>
+        <html lang="pt-br">
+        <head>
+          <meta charset="utf-8">
+          <title>{titulo} - E.M José Padin Mouta</title>
+        </head>
+        <body>
+          <p>{declaracao_text}</p>
+        </body>
+        </html>
+        """
+    return html_declaracao
 
 @app.route('/login', methods=['GET', 'POST']) 
 def login():
@@ -648,7 +1055,7 @@ def login():
         token = request.form.get('token')
         if token == ACCESS_TOKEN:
             session['logged_in'] = True
-            return redirect(url_for('index'))
+            return redirect(url_for('dashboard'))
         else:
             error = "Token inválido. Tente novamente."
     login_html = '''
@@ -715,7 +1122,7 @@ def login():
       </head>
       <body>
         <header>
-          <h1 class="mb-0">Carteirinhas - E.M José Padin Mouta</h1>
+          <h1 class="mb-0">Secretaria - E.M José Padin Mouta</h1>
         </header>
         <main>
           <div class="container container-login">
@@ -739,14 +1146,120 @@ def login():
     '''
     return render_template_string(login_html, error=error)
 
-@app.route('/logout') 
+@app.route('/logout')
 def logout():
     session.clear()
     return redirect(url_for('login'))
 
-@app.route('/', methods=['GET', 'POST'])
+@app.route('/', methods=['GET'])
 @login_required
-def index():
+def dashboard():
+    dashboard_html = '''
+    <!doctype html>
+    <html lang="pt-br">
+      <head>
+        <meta charset="utf-8">
+        <title>Secretaria - E.M José Padin Mouta</title>
+        <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+        <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
+        <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
+        <style>
+          body {
+            background: #eef2f3;
+            font-family: 'Montserrat', sans-serif;
+          }
+          header {
+            background-color: #283E51;
+            color: #fff;
+            padding: 20px;
+            text-align: center;
+          }
+          .container-dashboard {
+            background: #fff;
+            padding: 40px;
+            border-radius: 10px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            margin: 40px auto;
+            max-width: 800px;
+          }
+          .option-card {
+            border: 1px solid #ccc;
+            border-radius: 10px;
+            padding: 20px;
+            text-align: center;
+            transition: transform 0.2s;
+            cursor: pointer;
+            margin-bottom: 20px;
+          }
+          .option-card:hover {
+            transform: scale(1.02);
+          }
+          .option-card h2 {
+            margin-bottom: 10px;
+            color: #283E51;
+          }
+          .option-card p {
+            color: #555;
+          }
+          .logout-container {
+            text-align: center;
+            margin-top: 20px;
+          }
+          .btn-logout {
+            background-color: #dc3545;
+            color: #fff;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 5px;
+            font-size: 16px;
+            text-decoration: none;
+            transition: background-color 0.3s;
+          }
+          .btn-logout:hover {
+            background-color: #c82333;
+          }
+          footer {
+            background-color: #424242;
+            color: #fff;
+            text-align: center;
+            padding: 10px;
+            position: fixed;
+            bottom: 0;
+            width: 100%;
+          }
+        </style>
+      </head>
+      <body>
+        <header>
+          <h1>Secretaria - E.M José Padin Mouta</h1>
+        </header>
+        <div class="container container-dashboard">
+          <div class="option-card" onclick="window.location.href='{{ url_for('declaracao_upload') }}'">
+            <h2>Declaração Escolar</h2>
+            <p>Gerar declaração escolar.</p>
+          </div>
+          <div class="option-card" onclick="window.location.href='{{ url_for('carteirinhas') }}'">
+            <h2>Carteirinhas</h2>
+            <p>Gerar carteirinhas para os alunos.</p>
+          </div>
+          <div class="logout-container">
+            <a href="{{ url_for('logout') }}" class="btn-logout">
+              <i class="fas fa-sign-out-alt"></i> Logout
+            </a>
+          </div>
+        </div>
+        <footer>
+          Desenvolvido por Nilson Cruz © 2025. Todos os direitos reservados.
+        </footer>
+      </body>
+    </html>
+    '''
+    return render_template_string(dashboard_html)
+
+# Rotas para Carteirinhas e Upload de Fotos permanecem inalteradas
+@app.route('/carteirinhas', methods=['GET', 'POST'])
+@login_required
+def carteirinhas():
     if request.method == 'POST':
         if 'excel_file' in request.files:
             file = request.files['excel_file']
@@ -755,12 +1268,12 @@ def index():
             flash("Gerando carteirinhas. Aguarde...", "info")
             html_result = gerar_html_carteirinhas(file)
             return html_result
-    index_html = '''
+    carteirinhas_html = '''
     <!doctype html>
     <html lang="pt-br">
       <head>
         <meta charset="utf-8">
-        <title>Upload para Carteirinhas</title>
+        <title>Carteirinhas - E.M José Padin Mouta</title>
         <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
         <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css">
         <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
@@ -900,7 +1413,7 @@ def index():
             </form>
           </div>
           <div class="logout-container">
-            <a href="/logout" class="btn-logout">
+            <a href="{{ url_for('logout') }}" class="btn-logout">
               <i class="fas fa-sign-out-alt"></i> Logout
             </a>
           </div>
@@ -908,7 +1421,7 @@ def index():
         <footer>
           Desenvolvido por Nilson Cruz © 2025. Todos os direitos reservados.
         </footer>
-        <script src="https://code.jquery.com/jquery-3.5.1.slim.min.js"></script>
+        <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
         <script src="https://cdn.jsdelivr.net/npm/bootstrap@4.5.2/dist/js/bootstrap.bundle.min.js"></script>
         <script>
           setTimeout(function(){
@@ -918,46 +1431,46 @@ def index():
             }
           }, 3000);
           
-        function showLoading() {
-          var existingOverlay = document.getElementById('loading-overlay');
-          if (existingOverlay) {
-            existingOverlay.remove();
-          }
-          var loadingOverlay = document.createElement('div');
-          loadingOverlay.id = 'loading-overlay';
-          loadingOverlay.style.position = 'fixed';
-          loadingOverlay.style.top = '0';
-          loadingOverlay.style.left = '0';
-          loadingOverlay.style.right = '0';
-          loadingOverlay.style.bottom = '0';
-          loadingOverlay.style.background = 'rgba(0,0,0,0.5)';
-          loadingOverlay.style.display = 'flex';
-          loadingOverlay.style.alignItems = 'center';
-          loadingOverlay.style.justifyContent = 'center';
-          loadingOverlay.style.zIndex = '9999';
-          loadingOverlay.innerHTML = `
-            <div style="text-align: center; color: white; font-family: Arial, sans-serif;">
-              <svg width="3.0cm" height="4.5cm" viewBox="0 0 6.0 9.0" xmlns="http://www.w3.org/2000/svg">
-                <rect x="0.3" y="0.3" width="5.4" height="8.4" rx="0.3" ry="0.3" stroke="white" stroke-width="0.1" fill="none" />
-                <rect id="badge-fill" x="0.3" y="8.7" width="5.4" height="0" rx="0.3" ry="0.3" fill="white" />
-              </svg>
-              <p style="margin-top: 0.2cm;">Gerando carteirinhas...</p>
-            </div>
-          `;
-          document.body.appendChild(loadingOverlay);
-          let fillHeight = 0;
-          const maxHeight = 8.4;
-          const interval = setInterval(() => {
-            fillHeight += 0.2;
-            if (fillHeight > maxHeight) {
-              fillHeight = maxHeight;
-              clearInterval(interval);
+          function showLoading() {
+            var existingOverlay = document.getElementById('loading-overlay');
+            if (existingOverlay) {
+              existingOverlay.remove();
             }
-            const badgeFill = document.getElementById('badge-fill');
-            badgeFill.setAttribute('y', 8.7 - fillHeight);
-            badgeFill.setAttribute('height', fillHeight);
-          }, 100);
-        }
+            var loadingOverlay = document.createElement('div');
+            loadingOverlay.id = 'loading-overlay';
+            loadingOverlay.style.position = 'fixed';
+            loadingOverlay.style.top = '0';
+            loadingOverlay.style.left = '0';
+            loadingOverlay.style.right = '0';
+            loadingOverlay.style.bottom = '0';
+            loadingOverlay.style.background = 'rgba(0,0,0,0.5)';
+            loadingOverlay.style.display = 'flex';
+            loadingOverlay.style.alignItems = 'center';
+            loadingOverlay.style.justifyContent = 'center';
+            loadingOverlay.style.zIndex = '9999';
+            loadingOverlay.innerHTML = `
+              <div style="text-align: center; color: white; font-family: Arial, sans-serif;">
+                <svg width="3.0cm" height="4.5cm" viewBox="0 0 6.0 9.0" xmlns="http://www.w3.org/2000/svg">
+                  <rect x="0.3" y="0.3" width="5.4" height="8.4" rx="0.3" ry="0.3" stroke="white" stroke-width="0.1" fill="none" />
+                  <rect id="badge-fill" x="0.3" y="8.7" width="5.4" height="0" rx="0.3" ry="0.3" fill="white" />
+                </svg>
+                <p id="loading-text" style="margin-top: 0.2cm;">Gerando carteirinhas...</p>
+              </div>
+            `;
+            document.body.appendChild(loadingOverlay);
+            let fillHeight = 0;
+            const maxHeight = 8.4;
+            const interval = setInterval(() => {
+              fillHeight += 0.2;
+              if (fillHeight > maxHeight) {
+                fillHeight = maxHeight;
+                clearInterval(interval);
+              }
+              const badgeFill = document.getElementById('badge-fill');
+              badgeFill.setAttribute('y', 8.7 - fillHeight);
+              badgeFill.setAttribute('height', fillHeight);
+            }, 100);
+          }
     
           document.getElementById('show-multi-upload').addEventListener('click', function() {
             var section = document.getElementById('multi-upload-section');
@@ -986,7 +1499,218 @@ def index():
       </body>
     </html>
     '''
-    return render_template_string(index_html)
+    return render_template_string(carteirinhas_html)
+
+# Fluxo para Declaração Escolar: Upload da lista piloto e seleção do aluno/tipo
+@app.route('/declaracao/upload', methods=['GET', 'POST'])
+@login_required
+def declaracao_upload():
+    if request.method == 'POST':
+        if 'excel_file' not in request.files:
+            flash("Nenhum arquivo enviado.", "error")
+            return redirect(url_for('declaracao_upload'))
+        file = request.files['excel_file']
+        if file.filename == '':
+            flash("Nenhum arquivo selecionado.", "error")
+            return redirect(url_for('declaracao_upload'))
+        filename = secure_filename(file.filename)
+        unique_filename = f"declaracao_{uuid.uuid4().hex}_{filename}"
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+        file.save(file_path)
+        session['declaracao_excel'] = file_path
+        return redirect(url_for('declaracao_select'))
+    
+    upload_form = '''
+    <!doctype html>
+    <html lang="pt-br">
+    <head>
+      <meta charset="utf-8">
+      <title>Declaração Escolar - Anexar Lista Piloto</title>
+      <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+      <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
+      <style>
+        body {
+          background: #eef2f3;
+          font-family: 'Montserrat', sans-serif;
+        }
+        header {
+          background-color: #283E51;
+          color: #fff;
+          padding: 20px;
+          text-align: center;
+        }
+        .container-form {
+          background: #fff;
+          padding: 40px;
+          border-radius: 10px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+          margin: 40px auto;
+          max-width: 600px;
+          text-align: center;
+        }
+        .btn-primary {
+          background-color: #283E51;
+          border: none;
+        }
+        .btn-primary:hover {
+          background-color: #1d2d3a;
+        }
+        footer {
+          background-color: #424242;
+          color: #fff;
+          text-align: center;
+          padding: 10px;
+          position: fixed;
+          bottom: 0;
+          width: 100%;
+        }
+      </style>
+    </head>
+    <body>
+      <header>
+        <h1>Declaração Escolar - Anexar Lista Piloto</h1>
+      </header>
+      <div class="container container-form">
+        <form method="POST" enctype="multipart/form-data">
+          <div class="form-group">
+            <label for="excel_file">Selecione o arquivo Excel:</label>
+            <input type="file" class="form-control-file" name="excel_file" id="excel_file" accept=".xlsx, .xls" required>
+          </div>
+          <button type="submit" class="btn btn-primary">Anexar Lista</button>
+        </form>
+      </div>
+      <footer>
+        Desenvolvido por Nilson Cruz © 2025. Todos os direitos reservados.
+      </footer>
+    </body>
+    </html>
+    '''
+    return render_template_string(upload_form)
+
+# Seleção do aluno e tipo de declaração
+@app.route('/declaracao/select', methods=['GET', 'POST'])
+@login_required
+def declaracao_select():
+    file_path = session.get('declaracao_excel')
+    if not file_path or not os.path.exists(file_path):
+        flash("Arquivo Excel não encontrado. Por favor, anexe a lista piloto.", "error")
+        return redirect(url_for('declaracao_upload'))
+    
+    planilha = pd.read_excel(file_path, sheet_name='LISTA CORRIDA')
+    def format_rm(x):
+        try:
+            return str(int(float(x)))
+        except:
+            return str(x)
+    planilha['RM_str'] = planilha['RM'].apply(format_rm)
+    alunos = planilha[planilha['RM_str'] != "0"][['RM_str', 'NOME']].drop_duplicates()
+    options_html = ""
+    for _, row in alunos.iterrows():
+        rm_str = row['RM_str']
+        nome = row['NOME']
+        options_html += f'<option value="{rm_str}">{rm_str} - {nome}</option>'
+    
+    if request.method == 'POST':
+        rm = request.form.get('rm')
+        tipo = request.form.get('tipo')
+        if not rm or not tipo:
+            flash("Selecione o aluno e o tipo de declaração.", "error")
+            return redirect(url_for('declaracao_select'))
+        declaracao_html = gerar_declaracao_escolar(file_path, rm, tipo)
+        if declaracao_html is None:
+            flash("Aluno não encontrado.", "error")
+            return redirect(url_for('declaracao_select'))
+        return declaracao_html
+
+    select_form = f'''
+    <!doctype html>
+    <html lang="pt-br">
+    <head>
+      <meta charset="utf-8">
+      <title>Declaração Escolar - Seleção de Aluno</title>
+      <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+      <link href="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/css/select2.min.css" rel="stylesheet" />
+      <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
+      <style>
+        body {{
+          background: #eef2f3;
+          font-family: 'Montserrat', sans-serif;
+        }}
+        header {{
+          background-color: #283E51;
+          color: #fff;
+          padding: 20px;
+          text-align: center;
+        }}
+        .container-form {{
+          background: #fff;
+          padding: 40px;
+          border-radius: 10px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+          margin: 40px auto;
+          max-width: 600px;
+        }}
+        .btn-primary {{
+          background-color: #283E51;
+          border: none;
+        }}
+        .btn-primary:hover {{
+          background-color: #1d2d3a;
+        }}
+        footer {{
+          background-color: #424242;
+          color: #fff;
+          text-align: center;
+          padding: 10px;
+          position: fixed;
+          bottom: 0;
+          width: 100%;
+        }}
+      </style>
+    </head>
+    <body>
+      <header>
+        <h1>Declaração Escolar</h1>
+        <p>Selecione o aluno e o tipo de declaração</p>
+      </header>
+      <div class="container container-form">
+        <form method="POST">
+          <div class="form-group">
+            <label for="rm">Aluno:</label>
+            <select class="form-control" id="rm" name="rm" required>
+              <option value="">Selecione</option>
+              {options_html}
+            </select>
+          </div>
+          <div class="form-group">
+            <label for="tipo">Tipo de Declaração:</label>
+            <select class="form-control" id="tipo" name="tipo" required>
+              <option value="">Selecione</option>
+              <option value="Escolaridade">Declaração de Escolaridade</option>
+              <option value="Transferencia">Declaração de Transferência</option>
+              <option value="Conclusão">Declaração de Conclusão</option>
+            </select>
+          </div>
+          <button type="submit" class="btn btn-primary">Gerar Declaração</button>
+        </form>
+      </div>
+      <footer>
+        Desenvolvido por Nilson Cruz © 2025. Todos os direitos reservados.
+      </footer>
+      <script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+      <script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js"></script>
+      <script>
+        $(document).ready(function() {{
+          $('#rm').select2({{
+            placeholder: "Selecione o aluno",
+            allowClear: true
+          }});
+        }});
+      </script>
+    </body>
+    </html>
+    '''
+    return render_template_string(select_form)
 
 @app.route('/upload_foto', methods=['POST'])
 def upload_foto():
@@ -1007,7 +1731,7 @@ def upload_foto():
     file_path = os.path.join('static', 'fotos', new_filename)
     file.save(file_path)
     flash("Foto anexada com sucesso", "success")
-    return redirect(url_for('index'))
+    return redirect(url_for('carteirinhas'))
 
 @app.route('/upload_multiplas_fotos', methods=['POST'])
 def upload_multiplas_fotos():
@@ -1030,7 +1754,7 @@ def upload_multiplas_fotos():
         file_path = os.path.join('static', 'fotos', new_filename)
         file.save(file_path)
     flash("Foto(s) anexada(s) com sucesso", "success")
-    return redirect(url_for('index'))
+    return redirect(url_for('carteirinhas'))
 
 @app.route('/upload_inline_foto', methods=['POST'])
 def upload_inline_foto():
