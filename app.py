@@ -1,4 +1,4 @@
-from flask import Flask, request, redirect, url_for, render_template_string, jsonify, session, flash, send_file
+from flask import Flask, request, redirect, url_for, render_template_string, jsonify, session, flash, send_file       
 import pandas as pd
 import os
 import uuid
@@ -7,8 +7,9 @@ from datetime import datetime
 from io import BytesIO
 from werkzeug.utils import secure_filename
 from functools import wraps
-from openpyxl import load_workbook
 import locale
+import xlrd  # Para ler arquivos .xls
+from openpyxl import load_workbook, Workbook  # Usado para trabalhar com XLSX e para converter XLS
 
 # Tenta definir a localidade para formatação de datas em português
 try:
@@ -51,6 +52,40 @@ def set_merged_cell_value(ws, cell_coord, value):
             ws.merge_cells(range_str)
             return
     ws[cell_coord] = value
+
+def convert_xls_to_xlsx(file_like):
+    """
+    Converte um arquivo XLS (file-like) para um Workbook do openpyxl.
+    """
+    # Lê o conteúdo do XLS usando xlrd
+    book_xlrd = xlrd.open_workbook(file_contents=file_like.read())
+    wb = Workbook()
+    # Remove a planilha padrão se houver e houver planilhas no arquivo XLS
+    if "Sheet" in wb.sheetnames and len(book_xlrd.sheet_names()) > 0:
+        std = wb.active
+        wb.remove(std)
+    for sheet_name in book_xlrd.sheet_names():
+        sheet_xlrd = book_xlrd.sheet_by_name(sheet_name)
+        ws = wb.create_sheet(title=sheet_name)
+        for row in range(sheet_xlrd.nrows):
+            for col in range(sheet_xlrd.ncols):
+                ws.cell(row=row+1, column=col+1, value=sheet_xlrd.cell_value(row, col))
+    return wb
+
+def load_workbook_model(file):
+    """
+    Abre o arquivo do modelo. Se for XLSX, utiliza openpyxl.load_workbook;
+    se for XLS, converte para um Workbook do openpyxl.
+    """
+    ext = os.path.splitext(file.filename)[1].lower()
+    file.seek(0)
+    if ext == '.xlsx':
+        return load_workbook(file)
+    elif ext == '.xls':
+        content = file.read()
+        return convert_xls_to_xlsx(BytesIO(content))
+    else:
+        raise ValueError("Formato de arquivo não suportado para o quadro modelo.")
 
 def gerar_html_carteirinhas(arquivo_excel):
     planilha = pd.read_excel(arquivo_excel, sheet_name='LISTA CORRIDA')
@@ -203,66 +238,10 @@ def gerar_html_carteirinhas(arquivo_excel):
     @media print {
       .no-print { display: none !important; }
       body {
-        background-color: #fff;
         margin: 0;
         padding: 0;
-        display: flex;
-        flex-direction: column;
-        height: 100vh;
+        font-size: 16px;
       }
-      .carteirinhas-container {
-        width: 100%;
-        max-width: 1100px;
-        margin: auto;
-      }
-      .page {
-        display: flex;
-        flex-direction: column;
-        justify-content: center;
-        min-height: 100vh;
-        margin-bottom: 0;
-        page-break-after: always;
-      }
-      #search-container { display: none !important; }
-      .cards-grid {
-        display: grid;
-        grid-template-columns: repeat(2, 1fr);
-        gap: 0.2cm;
-        justify-items: center;
-      }
-      .carteirinha {
-        width: 6.0cm;
-        height: 9.0cm !important;
-        page-break-inside: avoid;
-        padding-top: 0.2cm;
-      }
-      .status { height: 0.6cm; line-height: 0.6cm; text-align: center; }
-      .foto { width: 1.8cm; height: 1.8cm; border: 0.1cm solid #2196F3; object-fit: cover; }
-      .info { margin-top: 0.1cm; }
-      footer.declaration-footer {
-        display: block;
-        text-align: center;
-        font-size: 0.9em;
-        border-top: 1px solid #ccc;
-        padding: 15px 0;
-        margin-top: 0;
-      }
-      .signature {
-        text-align: center;
-        margin-top: auto;
-      }
-      @page {
-        size: A4 portrait;
-        margin: 5mm;
-      }
-      .imprimir-carteirinhas, .imprimir-pagina { display: none !important; }
-      .printable-declaration {
-        display: flex;
-        flex-direction: column;
-        min-height: 100vh;
-        page-break-after: always;
-      }
-      .printable-declaration:last-child { page-break-after: auto; }
     }
     .imprimir-carteirinhas {
       position: fixed;
@@ -331,6 +310,16 @@ def gerar_html_carteirinhas(arquivo_excel):
       background: none;
       cursor: pointer;
     }
+    /* Novo estilo para o header, mais suave e moderno */
+    header {
+      background: linear-gradient(90deg, #283E51, #4B79A1);
+      color: #fff;
+      padding: 20px;
+      text-align: center;
+      border-bottom: 3px solid #1d2d3a;
+      border-radius: 0 0 15px 15px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }
   </style>
 </head>
 <body>
@@ -359,8 +348,7 @@ def gerar_html_carteirinhas(arquivo_excel):
     html_content += '<div class="cards-grid">'
     
     for _, row in dados.iterrows():
-        rm = str(row['RM'])
-        if rm == '0':
+        if not str(row['RM']).strip() or str(row['RM']).strip() == "0":
             continue
         
         nome = row['NOME']
@@ -392,29 +380,29 @@ def gerar_html_carteirinhas(arquivo_excel):
         allowed_exts = ['.jpg', '.jpeg', '.png', '.bmp', '.gif']
         found_photo = None
         for ext in allowed_exts:
-            caminho_foto = f'static/fotos/{rm}{ext}'
+            caminho_foto = f'static/fotos/{row["RM"]}{ext}'
             if os.path.exists(caminho_foto):
-                found_photo = f"/static/fotos/{rm}{ext}"
+                found_photo = f"/static/fotos/{row['RM']}{ext}"
                 break
         
         if not found_photo:
             alunos_sem_fotos_list.append({
-                'rm': rm,
+                'rm': row['RM'],
                 'nome': nome,
                 'serie': serie
             })
         
         if found_photo:
-            foto_tag = f'<img src="{found_photo}" alt="Foto" class="foto uploadable" data-rm="{rm}">'
+            foto_tag = f'<img src="{found_photo}" alt="Foto" class="foto uploadable" data-rm="{row["RM"]}">'
         else:
             foto_tag = f'''
-            <div class="foto uploadable" data-rm="{rm}" style="display: flex; flex-direction: column; align-items: center; justify-content: center;">
+            <div class="foto uploadable" data-rm="{row["RM"]}" style="display: flex; flex-direction: column; align-items: center; justify-content: center;">
               <span style="font-size:0.8cm; opacity:0.5; color: grey; margin-bottom: 0.1cm;">&#128247;</span>
               <small style="font-size:0.2cm; opacity:0.5; color: grey;">Anexe uma foto</small>
             </div>
             '''
         
-        hidden_input = f'<input type="file" class="inline-upload" data-rm="{rm}" style="display:none;" accept="image/*">'
+        hidden_input = f'<input type="file" class="inline-upload" data-rm="{row["RM"]}" style="display:none;" accept="image/*">'
         
         html_content += f"""
       <div class="borda-pontilhada">
@@ -429,7 +417,7 @@ def gerar_html_carteirinhas(arquivo_excel):
             </div>
             <div class="linha-rm">
               <span class="titulo">RM:</span>
-              <span class="descricao">{rm}</span>
+              <span class="descricao">{row['RM']}</span>
             </div>
             <div class="linha">
               <div class="titulo">Série:</div>
@@ -717,31 +705,6 @@ def gerar_declaracao_escolar(file_path, rm, tipo):
     mes = meses[now.month].capitalize()
     data_extenso = f"Praia Grande, {now.day:02d} de {mes} de {now.year}"
     
-    header_html = f'''
-    <div class="header">
-      <div style="display: flex; justify-content: space-between; align-items: center;">
-        <img src="/static/logos/escola.png" alt="Escola Logo" style="height: 80px;">
-        <div style="text-align: center; flex-grow: 1;">
-          <h3 style="margin: 0; line-height: 1.2;">
-            Município da Estância Balneária de Praia Grande<br>
-            Estado de São Paulo<br>
-            Secretaria de Educação
-          </h3>
-        </div>
-        <img src="/static/logos/municipio.png" alt="Município Logo" style="height: 80px;">
-      </div>
-      <div style="text-align: right; margin-top: 30px;">
-        <p style="margin: 0;">{data_extenso}</p>
-      </div>
-    </div>
-    '''
-    
-    print_button_html = '''
-    <div class="no-print" style="text-align: center;">
-      <button onclick="window.print()" class="print-button">Imprimir Declaração</button>
-    </div>
-    '''
-    
     additional_css = '''
 .print-button {
   background-color: #283E51;
@@ -756,178 +719,24 @@ def gerar_declaracao_escolar(file_path, rm, tipo):
   background-color: #1d2d3a;
 }
 '''
-    
-    footer_html = '''
-    <footer class="declaration-footer">
-      <p>Rua: Bororós, nº 150, Vila Tupi, Praia Grande - SP, CEP: 11703-390</p>
-      <p>Telefone: 3496-5321 | E-mail: em.padin@praiagrande.sp.gov.br</p>
-    </footer>
-    '''
-    
     if tipo == "Escolaridade":
+        titulo = "Declaração de Escolaridade"
         declaracao_text = (
             f"Declaro, para os devidos fins, que o(a) aluno(a) <strong><u>{nome}</u></strong>, "
             f"portador(a) do RA <strong><u>{ra}</u></strong>, nascido(a) em <strong><u>{data_nasc}</u></strong>, "
             f"encontra-se regularmente matriculado(a) na E.M José Padin Mouta, cursando atualmente o "
             f"<strong><u>{serie}</u></strong>."
         )
-        titulo = "Declaração de Escolaridade"
-        html_declaracao = f"""<!doctype html>
-<html lang="pt-br">
-<head>
-  <meta charset="utf-8">
-  <title>{titulo} - E.M José Padin Mouta</title>
-  <style>
-    body {{
-      font-family: Arial, sans-serif;
-      margin: 2cm;
-      display: flex;
-      font-size: 18px;
-      flex-direction: column;
-      min-height: 100vh;
-    }}
-    .content {{
-      margin-top: 3cm;
-      text-align: justify;
-      line-height: 1.5;
-      flex: 1;
-    }}
-    .signature {{
-      text-align: center;
-      margin-top: auto;
-    }}
-    .signature p.line {{
-      margin-bottom: 0.5cm;
-    }}
-    @media screen {{
-      footer.declaration-footer {{ display: none; }}
-    }}
-    @media print {{
-      body {{
-        display: flex;
-        flex-direction: column;
-        height: 100vh;
-        margin: 0;
-        padding: 0;
-      }}
-      .content {{
-        flex: 1;
-      }}
-      .signature {{
-        text-align: center;
-        margin-top: auto;
-      }}
-      footer.declaration-footer {{
-        display: block;
-        text-align: center;
-        font-size: 0.9em;
-        border-top: 1px solid #ccc;
-        padding: 15px 0;
-        margin-top: 0;
-      }}
-      .no-print {{ display: none !important; }}
-    }}
-    {additional_css}
-  </style>
-</head>
-<body>
-  {header_html}
-  <div class="content">
-    <p>{declaracao_text}</p>
-  </div>
-  <div class="signature">
-    <p class="line">__________________________________</p>
-    <p>Luciana Rocha Augustinho</p>
-    <p>Diretora da Unidade Escolar</p>
-  </div>
-  {footer_html}
-  {print_button_html}
-</body>
-</html>
-"""
     elif tipo == "Transferencia":
+        titulo = "Declaração de Transferência"
         declaracao_text = (
             f"Declaro, para os devidos fins, que o(a) aluno(a) <strong><u>{nome}</u></strong>, "
             f"portador(a) do RA <strong><u>{ra}</u></strong>, nascido(a) em <strong><u>{data_nasc}</u></strong>, "
-            f"solicitou transferência de nossa unidade escolar na data de hoje "
-            f"estando apto(a) a cursar o <strong><u>{serie}</u></strong>."
+            f"solicitou transferência de nossa unidade escolar na data de hoje, estando apto(a) a cursar o "
+            f"<strong><u>{serie}</u></strong>."
         )
-        titulo = "Declaração de Transferência"
-        # Correção aplicada: estrutura similar à declaração de escolaridade, com layout flex e assinatura empurrada para o final.
-        html_declaracao = f"""<!doctype html>
-<html lang="pt-br">
-<head>
-  <meta charset="utf-8">
-  <title>{titulo} - E.M José Padin Mouta</title>
-  <style>
-    body {{
-      font-family: Arial, sans-serif;
-      margin: 2cm;
-      display: flex;
-      font-size: 18px;
-      flex-direction: column;
-      min-height: 100vh;
-    }}
-    .content {{
-      flex: 1;
-      text-align: justify;
-      line-height: 1.5;
-      margin-top: 3cm;
-    }}
-    .signature {{
-      text-align: center;
-      margin-top: auto;
-    }}
-    .signature p.line {{
-      margin-bottom: 0.5cm;
-    }}
-    @media screen {{
-      footer.declaration-footer {{ display: none; }}
-    }}
-    @media print {{
-      body {{
-        display: flex;
-        flex-direction: column;
-        height: 100vh;
-        margin: 0;
-        padding: 0;
-      }}
-      .content {{
-        flex: 1;
-      }}
-      .signature {{
-        text-align: center;
-        margin-top: auto;
-      }}
-      footer.declaration-footer {{
-        display: block;
-        text-align: center;
-        font-size: 0.9em;
-        border-top: 1px solid #ccc;
-        padding: 15px 0;
-        margin-top: 0;
-      }}
-      .no-print {{ display: none !important; }}
-    }}
-    {additional_css}
-  </style>
-</head>
-<body>
-  {header_html}
-  <div class="content">
-    <p>{declaracao_text}</p>
-  </div>
-  <div class="signature">
-    <p class="line">__________________________________</p>
-    <p>Luciana Rocha Augustinho</p>
-    <p>Diretora da Unidade Escolar</p>
-  </div>
-  {footer_html}
-  {print_button_html}
-</body>
-</html>
-"""
     elif tipo == "Conclusão":
+        titulo = "Declaração de Conclusão"
         match = re.search(r"(\d+)º\s*ano", serie)
         if match:
             next_year = int(match.group(1)) + 1
@@ -937,97 +746,144 @@ def gerar_declaracao_escolar(file_path, rm, tipo):
         declaracao_text = (
             f"Declaro, para os devidos fins, que o(a) aluno(a) <strong><u>{nome}</u></strong>, "
             f"portador(a) do RA <strong><u>{ra}</u></strong>, nascido(a) em <strong><u>{data_nasc}</u></strong>, "
-            f"concluiu com êxito o <strong><u>{serie}</u></strong>, estando apto(a) a ingressar no <strong><u>{series_text}</u></strong>."
+            f"concluiu com êxito o <strong><u>{serie}</u></strong>, estando apto(a) a ingressar no "
+            f"<strong><u>{series_text}</u></strong>."
         )
-        titulo = "Declaração de Conclusão"
-        html_declaracao = f"""<!doctype html>
+    else:
+        titulo = "Declaração"
+        declaracao_text = "Tipo de declaração inválido."
+    
+    base_template = f'''<!doctype html>
 <html lang="pt-br">
 <head>
   <meta charset="utf-8">
   <title>{titulo} - E.M José Padin Mouta</title>
   <style>
-    body {{
-      font-family: Arial, sans-serif;
-      margin: 2cm;
-      display: flex;
-      flex-direction: column;
-      min-height: 100vh;
+    @page {{
+      margin: 0;
+    }}
+    html, body {{
+      margin: 0;
+      padding: 0.5cm;
+      font-family: 'Montserrat', sans-serif;
+      font-size: 16px;
+      line-height: 1.5;
+      color: #333;
+    }}
+    .header {{
+      text-align: center;
+      border-bottom: 2px solid #283E51;
+      padding-bottom: 5px;
+      margin-bottom: 10px;
+    }}
+    .header h1 {{
+      margin: 0;
+      font-size: 24px;
+      text-transform: uppercase;
+      color: #283E51;
+    }}
+    .header p {{
+      margin: 3px 0;
+      font-size: 16px;
+    }}
+    .date {{
+      text-align: right;
+      font-size: 16px;
+      margin-bottom: 10px;
     }}
     .content {{
-      margin-top: 3cm;
       text-align: justify;
-      line-height: 1.5;
-      font-size: 18px;
-      flex: 1;
+      margin-bottom: 10px;
     }}
     .signature {{
       text-align: center;
-      margin-top: auto;
+      margin: 0;
+      padding: 0;
     }}
-    .signature p.line {{
-      margin-bottom: 0.5cm;
+    .signature .line {{
+      height: 1px;
+      background-color: #333;
+      width: 60%;
+      margin: 0 auto 5px auto;
     }}
-    @media screen {{
-      footer.declaration-footer {{ display: none; }}
+    .footer {{
+      text-align: center;
+      border-top: 2px solid #283E51;
+      padding-top: 5px;
+      margin: 0;
+      font-size: 14px;
+      color: #555;
     }}
+    /* A declaração toda ficará em uma única folha */
     @media print {{
-      body {{
-        display: flex;
-        flex-direction: column;
-        height: 100vh;
-        margin: 0;
-        padding: 0;
-      }}
-      .content {{
-        flex: 1;
-      }}
-      .signature {{
-        text-align: center;
-        margin-top: auto;
-      }}
-      footer.declaration-footer {{
-        display: block;
-        text-align: center;
-        font-size: 0.9em;
-        border-top: 1px solid #ccc;
-        padding: 15px 0;
-        margin-top: 0;
-      }}
       .no-print {{ display: none !important; }}
+      body {{
+        margin: 0;
+        padding: 0.5cm;
+        font-size: 20px;
+      }}
+      .declaration-bottom {{
+         margin-top: 10cm;
+      }}
+
+      .date {{
+         margin-top: 2cm;
+      }}
+
     }}
     {additional_css}
+    /* Novo estilo para o header */
+    header {{
+      background: linear-gradient(90deg, #283E51, #4B79A1);
+      color: #fff;
+      padding: 20px;
+      text-align: center;
+      border-bottom: 3px solid #1d2d3a;
+      border-radius: 0 0 15px 15px;
+      box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+    }}
   </style>
 </head>
 <body>
-  {header_html}
-  <div class="content">
-    <p>{declaracao_text}</p>
+  <div class="declaration-container">
+    <div class="header">
+      <div style="display: flex; justify-content: space-between; align-items: center;">
+        <img src="/static/logos/escola.png" alt="Escola Logo" style="height: 80px;">
+        <div>
+          <h1>Secretaria de Educação</h1>
+          <p>E.M José Padin Mouta</p>
+          <p>Município da Estância Balneária de Praia Grande</p>
+          <p>Estado de São Paulo</p>
+        </div>
+        <img src="/static/logos/municipio.png" alt="Município Logo" style="height: 80px;">
+      </div>
+    </div>
+    <div class="date">
+      <p>{data_extenso}</p>
+    </div>
+    <div class="content">
+      <h2 style="text-align: center; text-transform: uppercase; color: #283E51;">{titulo}</h2>
+      <p>{declaracao_text}</p>
+    </div>
+    <div class="declaration-bottom">
+      <div class="signature">
+        <div class="line"></div>
+        <p>Luciana Rocha Augustinho</p>
+        <p>Diretora da Unidade Escolar</p>
+      </div>
+      <div class="footer">
+        <p>Rua: Bororós, nº 150, Vila Tupi, Praia Grande - SP, CEP: 11703-390</p>
+        <p>Telefone: 3496-5321 | E-mail: em.padin@praiagrande.sp.gov.br</p>
+      </div>
+    </div>
   </div>
-  <div class="signature">
-    <p class="line">__________________________________</p>
-    <p>Luciana Rocha Augustinho</p>
-    <p>Diretora da Unidade Escolar</p>
+  <div class="no-print" style="text-align: center; margin-top: 20px;">
+    <button onclick="window.print()" class="print-button">Imprimir Declaração</button>
   </div>
-  {footer_html}
-  {print_button_html}
 </body>
 </html>
-"""
-    else:
-        declaracao_text = "Tipo de declaração inválido."
-        titulo = "Declaração"
-        html_declaracao = f"""<!doctype html>
-<html lang="pt-br">
-<head>
-  <meta charset="utf-8">
-  <title>{titulo} - E.M José Padin Mouta</title>
-</head>
-<body>
-  <p>{declaracao_text}</p>
-</body>
-</html>
-"""
-    return html_declaracao
+'''
+    return base_template
 
 @app.route('/login', methods=['GET', 'POST']) 
 def login():
@@ -1058,10 +914,13 @@ def login():
             min-height: 100vh;
           }
           header {
-            background-color: #283E51;
+            background: linear-gradient(90deg, #283E51, #4B79A1);
             color: #fff;
             padding: 20px;
             text-align: center;
+            border-bottom: 3px solid #1d2d3a;
+            border-radius: 0 0 15px 15px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
           }
           main {
             flex: 1;
@@ -1150,10 +1009,13 @@ def dashboard():
             font-family: 'Montserrat', sans-serif;
           }
           header {
-            background-color: #283E51;
+            background: linear-gradient(90deg, #283E51, #4B79A1);
             color: #fff;
             padding: 20px;
             text-align: center;
+            border-bottom: 3px solid #1d2d3a;
+            border-radius: 0 0 15px 15px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
           }
           .container-dashboard {
             background: #fff;
@@ -1215,7 +1077,7 @@ def dashboard():
           <h1>Secretaria - E.M José Padin Mouta</h1>
         </header>
         <div class="container container-dashboard">
-          <div class="option-card" onclick="window.location.href='{{ url_for('declaracao_upload') }}'">
+          <div class="option-card" onclick="window.location.href='{{ url_for('declaracao_tipo') }}'">
             <h2>Declaração Escolar</h2>
             <p>Gerar declaração escolar.</p>
           </div>
@@ -1267,10 +1129,13 @@ def carteirinhas():
             font-family: 'Montserrat', sans-serif;
           }
           header {
-            background-color: #283E51;
+            background: linear-gradient(90deg, #283E51, #4B79A1);
             color: #fff;
             padding: 20px;
             text-align: center;
+            border-bottom: 3px solid #1d2d3a;
+            border-radius: 0 0 15px 15px;
+            box-shadow: 0 4px 6px rgba(0,0,0,0.1);
           }
           .container-upload {
             background: #fff;
@@ -1517,10 +1382,13 @@ def declaracao_upload():
           font-family: 'Montserrat', sans-serif;
         }
         header {
-          background-color: #283E51;
+          background: linear-gradient(90deg, #283E51, #4B79A1);
           color: #fff;
           padding: 20px;
           text-align: center;
+          border-bottom: 3px solid #1d2d3a;
+          border-radius: 0 0 15px 15px;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }
         .container-form {
           background: #fff;
@@ -1619,10 +1487,13 @@ def declaracao_select():
           font-family: 'Montserrat', sans-serif;
         }}
         header {{
-          background-color: #283E51;
+          background: linear-gradient(90deg, #283E51, #4B79A1);
           color: #fff;
           padding: 20px;
           text-align: center;
+          border-bottom: 3px solid #1d2d3a;
+          border-radius: 0 0 15px 15px;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.1);
         }}
         .container-form {{
           background: #fff;
@@ -1693,6 +1564,144 @@ def declaracao_select():
     </html>
     '''
     return render_template_string(select_form)
+
+@app.route('/declaracao/tipo', methods=['GET', 'POST'])
+@login_required
+def declaracao_tipo():
+    if request.method == 'POST':
+        tipo = request.form.get('tipo')
+        if tipo == 'Fundamental':
+            return redirect(url_for('declaracao_upload'))
+        elif tipo == 'EJA':
+            msg_html = '''
+            <!doctype html>
+            <html lang="pt-br">
+            <head>
+                 <meta charset="utf-8">
+                 <title>Declaração EJA - Em Desenvolvimento</title>
+                 <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+                 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
+                 <style>
+                 body {
+                     background: #eef2f3;
+                     font-family: 'Montserrat', sans-serif;
+                 }
+                 header {
+                     background: linear-gradient(90deg, #283E51, #4B79A1);
+                     color: #fff;
+                     padding: 20px;
+                     text-align: center;
+                     border-bottom: 3px solid #1d2d3a;
+                     border-radius: 0 0 15px 15px;
+                     box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+                 }
+                 .container-msg {
+                     background: #fff;
+                     padding: 40px;
+                     border-radius: 10px;
+                     box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+                     margin: 40px auto;
+                     max-width: 600px;
+                     text-align: center;
+                 }
+                 footer {
+                     background-color: #424242;
+                     color: #fff;
+                     text-align: center;
+                     padding: 10px;
+                     position: fixed;
+                     bottom: 0;
+                     width: 100%;
+                 }
+                 </style>
+            </head>
+            <body>
+                 <header>
+                     <h1>Declaração EJA</h1>
+                 </header>
+                 <div class="container-msg">
+                     <p>Declaração EJA está em desenvolvimento.</p>
+                     <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Voltar ao Dashboard</a>
+                 </div>
+                 <footer>
+                     Desenvolvido por Nilson Cruz © 2025. Todos os direitos reservados.
+                 </footer>
+            </body>
+            </html>
+            '''
+            return render_template_string(msg_html)
+    form_html = '''
+    <!doctype html>
+    <html lang="pt-br">
+    <head>
+         <meta charset="utf-8">
+         <title>Selecionar Tipo de Declaração Escolar</title>
+         <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+         <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
+         <style>
+         body {
+             background: #eef2f3;
+             font-family: 'Montserrat', sans-serif;
+         }
+         header {
+             background: linear-gradient(90deg, #283E51, #4B79A1);
+             color: #fff;
+             padding: 20px;
+             text-align: center;
+             border-bottom: 3px solid #1d2d3a;
+             border-radius: 0 0 15px 15px;
+             box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+         }
+         .container-form {
+             background: #fff;
+             padding: 40px;
+             border-radius: 10px;
+             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+             margin: 40px auto;
+             max-width: 600px;
+         }
+         .btn-primary {
+             background-color: #283E51;
+             border: none;
+         }
+         .btn-primary:hover {
+             background-color: #1d2d3a;
+         }
+         footer {
+             background-color: #424242;
+             color: #fff;
+             text-align: center;
+             padding: 10px;
+             position: fixed;
+             bottom: 0;
+             width: 100%;
+         }
+         </style>
+    </head>
+    <body>
+         <header>
+             <h1>Selecionar Tipo de Declaração Escolar</h1>
+         </header>
+         <div class="container-form">
+             <form method="POST">
+                 <div class="form-group">
+                     <label for="tipo">Selecione o tipo:</label>
+                     <select class="form-control" id="tipo" name="tipo" required>
+                         <option value="">Selecione</option>
+                         <option value="Fundamental">Declaração Fundamental</option>
+                         <option value="EJA">Declaração EJA</option>
+                     </select>
+                 </div>
+                 <button type="submit" class="btn btn-primary">Continuar</button>
+             </form>
+         </div>
+         <footer>
+             Desenvolvido por Nilson Cruz © 2025. Todos os direitos reservados.
+         </footer>
+    </body>
+    </html>
+    '''
+    return render_template_string(form_html)
 
 @app.route('/upload_foto', methods=['POST'])
 def upload_foto():
@@ -1770,8 +1779,23 @@ def quadros():
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
       <style>
         body { background: #eef2f3; font-family: 'Montserrat', sans-serif; }
-        header { background-color: #283E51; color: #fff; padding: 20px; text-align: center; }
-        .container-menu { margin: 40px auto; max-width: 800px; }
+        header {
+          background: linear-gradient(90deg, #283E51, #4B79A1);
+          color: #fff;
+          padding: 20px;
+          text-align: center;
+          border-bottom: 3px solid #1d2d3a;
+          border-radius: 0 0 15px 15px;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .container-menu { 
+          margin: 40px auto; 
+          max-width: 800px; 
+          background: #fff; 
+          padding: 40px; 
+          border-radius: 10px; 
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15); 
+        }
         .option-card { border: 1px solid #ccc; border-radius: 10px; padding: 20px; text-align: center; transition: transform 0.2s; cursor: pointer; margin-bottom: 20px; }
         .option-card:hover { transform: scale(1.02); }
         .option-card h2 { margin-bottom: 10px; color: #283E51; }
@@ -1788,7 +1812,7 @@ def quadros():
           <h2>Inclusão</h2>
           <p>Gerar quadro de inclusão.</p>
         </div>
-        <div class="option-card" onclick="alert('Funcionalidade Quantitativo em desenvolvimento')">
+        <div class="option-card" onclick="window.location.href='{{ url_for('quadros_quantitativo') }}'">
           <h2>Quantitativo</h2>
           <p>Gerar quadro quantitativo.</p>
         </div>
@@ -1808,6 +1832,7 @@ def quadros():
     '''
     return render_template_string(quadros_html)
 
+# Rota para Quadro de Inclusão (já existente)
 @app.route('/quadros/inclusao', methods=['GET', 'POST'])
 @login_required
 def quadros_inclusao():
@@ -1821,9 +1846,10 @@ def quadros_inclusao():
             flash("Selecione os dois arquivos.", "error")
             return redirect(url_for('quadros_inclusao'))
         try:
-            wb = load_workbook(modelo_file)
+            modelo_file.seek(0)
+            wb = load_workbook_model(modelo_file)
         except Exception as e:
-            flash("Erro ao ler o arquivo de modelo.", "error")
+            flash(f"Erro ao ler o arquivo de modelo: {str(e)}", "error")
             return redirect(url_for('quadros_inclusao'))
         ws = wb.active
         set_merged_cell_value(ws, "C3", "Luciana Rocha Augustinho")
@@ -1834,6 +1860,7 @@ def quadros_inclusao():
         set_merged_cell_value(ws, "K4", "Ana Paula Rodrigues de Assis Santos")
         set_merged_cell_value(ws, "P4", datetime.now().strftime("%d/%m/%Y"))
         try:
+            lista_file.seek(0)
             df = pd.read_excel(lista_file, sheet_name="LISTA CORRIDA")
         except Exception as e:
             flash("Erro ao ler a Lista Piloto.", "error")
@@ -1841,13 +1868,15 @@ def quadros_inclusao():
         if len(df.columns) < 16:
             flash("O arquivo da Lista Piloto não possui colunas suficientes.", "error")
             return redirect(url_for('quadros_inclusao'))
-        inclusion_col = df.columns[15]
+        inclusion_col = df.columns[13]
         start_row = 7
         current_row = start_row
         for idx, row in df.iterrows():
+            if not str(row['RM']).strip() or str(row['RM']).strip() == "0":
+                continue
             if str(row[inclusion_col]).strip().lower() == "sim":
                 col_a_val = str(row[df.columns[0]]).strip()
-                match = re.match(r"(\d+º)([A-Za-z])", col_a_val)
+                match = re.match(r"(\d+º).*?([A-Za-z])$", col_a_val)
                 if match:
                     nivel = match.group(1)
                     turma = match.group(2)
@@ -1855,10 +1884,12 @@ def quadros_inclusao():
                     nivel = col_a_val
                     turma = ""
                 horario = str(row[df.columns[10]]).strip()
-                if horario == "08h00 às 12h00":
+                if "08h" in horario and "12h" in horario:
                     periodo = "MANHÃ"
                 elif horario == "13h30 às 17h30":
                     periodo = "TARDE"
+                elif horario == "19h00 às 23h00":
+                    periodo = "NOITE"
                 else:
                     periodo = ""
                 nome_aluno = str(row[df.columns[3]]).strip()
@@ -1874,12 +1905,28 @@ def quadros_inclusao():
                         data_nasc = "Desconhecida"
                 else:
                     data_nasc = "Desconhecida"
+                professor = str(row[df.columns[14]]).strip()
+                plano = str(row[df.columns[15]]).strip()
+                aee = str(row[df.columns[16]]).strip() if len(df.columns) > 16 else ""
+                deficiencia = str(row[df.columns[17]]).strip() if len(df.columns) > 17 else ""
+                observacoes = str(row[df.columns[18]]).strip() if len(df.columns) > 18 else ""
+                cadeira = str(row[df.columns[19]]).strip() if len(df.columns) > 19 else ""
+                adequacoes = cadeira
+                atendimentos = "-"
                 ws.cell(row=current_row, column=2, value=nivel)
                 ws.cell(row=current_row, column=3, value=turma)
                 ws.cell(row=current_row, column=4, value=periodo)
                 ws.cell(row=current_row, column=5, value=horario)
                 ws.cell(row=current_row, column=6, value=nome_aluno)
                 ws.cell(row=current_row, column=7, value=data_nasc)
+                ws.cell(row=current_row, column=8, value=professor)
+                ws.cell(row=current_row, column=9, value=plano)
+                ws.cell(row=current_row, column=10, value=aee)
+                ws.cell(row=current_row, column=11, value=deficiencia)
+                ws.cell(row=current_row, column=12, value=observacoes)
+                ws.cell(row=current_row, column=13, value=cadeira)
+                ws.cell(row=current_row, column=14, value=adequacoes)
+                ws.cell(row=current_row, column=15, value=atendimentos)
                 current_row += 1
         output = BytesIO()
         wb.save(output)
@@ -1897,7 +1944,15 @@ def quadros_inclusao():
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
       <style>
         body { background: #eef2f3; font-family: 'Montserrat', sans-serif; }
-        header { background-color: #283E51; color: #fff; padding: 20px; text-align: center; }
+        header {
+          background: linear-gradient(90deg, #283E51, #4B79A1);
+          color: #fff;
+          padding: 20px;
+          text-align: center;
+          border-bottom: 3px solid #1d2d3a;
+          border-radius: 0 0 15px 15px;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
         .container-form { background: #fff; padding: 40px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin: 40px auto; max-width: 600px; }
         .btn-primary { background-color: #283E51; border: none; }
         .btn-primary:hover { background-color: #1d2d3a; }
@@ -1919,6 +1974,121 @@ def quadros_inclusao():
             <input type="file" class="form-control-file" name="lista_file" id="lista_file" accept=".xlsx, .xls" required>
           </div>
           <button type="submit" class="btn btn-primary">Gerar Quadro de Inclusão</button>
+        </form>
+        <br>
+        <a href="{{ url_for('quadros') }}">Voltar para Quadros</a>
+      </div>
+      <footer>
+        Desenvolvido por Nilson Cruz © 2025. Todos os direitos reservados.
+      </footer>
+    </body>
+    </html>
+    '''
+    return render_template_string(upload_html)
+
+# Rota para Quadro Quantitativo – agora preenchido com dados da aba "Total de Alunos"
+@app.route('/quadros/quantitativo', methods=['GET', 'POST'])
+@login_required
+def quadros_quantitativo():
+    if request.method == 'POST':
+        if 'modelo_file' not in request.files or 'lista_file' not in request.files:
+            flash("Arquivos não enviados.", "error")
+            return redirect(url_for('quadros_quantitativo'))
+        modelo_file = request.files['modelo_file']
+        lista_file = request.files['lista_file']
+        if modelo_file.filename == '' or lista_file.filename == '':
+            flash("Selecione os dois arquivos.", "error")
+            return redirect(url_for('quadros_quantitativo'))
+        
+        # Para o arquivo modelo, aceitamos XLS ou XLSX
+        try:
+            wb_modelo = load_workbook_model(modelo_file)
+        except Exception as e:
+            flash(f"Erro ao ler o arquivo de modelo: {str(e)}", "error")
+            return redirect(url_for('quadros_quantitativo'))
+        
+        # Preencher na segunda aba (Aba 2: Fundamental..EJA) se existir; caso contrário, usa a aba ativa
+        if len(wb_modelo.sheetnames) >= 2:
+            ws_modelo = wb_modelo.worksheets[1]
+        else:
+            ws_modelo = wb_modelo.active
+
+        # Preencher o modelo conforme especificado (usando set_merged_cell_value para tratar células mescladas)
+        set_merged_cell_value(ws_modelo, "B5", "E.M José Padin Mouta")
+        set_merged_cell_value(ws_modelo, "C6", "Rafael Fernando da Silva")
+        set_merged_cell_value(ws_modelo, "B7", "46034")
+        current_month = datetime.now().strftime("%m")
+        set_merged_cell_value(ws_modelo, "A13", f"{current_month}/2025")
+        try:
+            lista_file.seek(0)
+            wb_lista = load_workbook(lista_file, data_only=True)
+        except Exception as e:
+            flash("Erro ao ler o arquivo da lista piloto.", "error")
+            return redirect(url_for('quadros_quantitativo'))
+        # Busca a aba "Total de Alunos" de forma case-insensitive
+        sheet_name = None
+        for name in wb_lista.sheetnames:
+            if name.strip().lower() == "total de alunos":
+                sheet_name = name
+                break
+        if not sheet_name:
+            flash("A aba 'Total de Alunos' não foi encontrada na lista piloto.", "error")
+            return redirect(url_for('quadros_quantitativo'))
+        ws_total = wb_lista[sheet_name]
+        # Preencher linhas 37 a 42 utilizando os valores da aba "Total de Alunos"
+        for r in range(37, 43):
+            source_row = r - 31  # linhas 6 a 11
+            value_B = ws_total.cell(row=source_row, column=7).value  # coluna G
+            value_C = ws_total.cell(row=source_row, column=8).value  # coluna H
+            set_merged_cell_value(ws_modelo, f"B{r}", value_B)
+            set_merged_cell_value(ws_modelo, f"C{r}", value_C)
+            set_merged_cell_value(ws_modelo, f"D{r}", f"=B{r}+C{r}")
+        output = BytesIO()
+        wb_modelo.save(output)
+        output.seek(0)
+        filename = f"Quadro_Quantitativo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        return send_file(output, as_attachment=True, download_name=filename, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
+    
+    upload_html = '''
+    <!doctype html>
+    <html lang="pt-br">
+    <head>
+      <meta charset="utf-8">
+      <title>Quadro Quantitativo - E.M José Padin Mouta</title>
+      <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+      <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
+      <style>
+        body { background: #eef2f3; font-family: 'Montserrat', sans-serif; }
+        header {
+          background: linear-gradient(90deg, #283E51, #4B79A1);
+          color: #fff;
+          padding: 20px;
+          text-align: center;
+          border-bottom: 3px solid #1d2d3a;
+          border-radius: 0 0 15px 15px;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .container-form { background: #fff; padding: 40px; border-radius: 10px; box-shadow: 0 4px 12px rgba(0,0,0,0.15); margin: 40px auto; max-width: 600px; }
+        .btn-primary { background-color: #283E51; border: none; }
+        .btn-primary:hover { background-color: #1d2d3a; }
+        footer { background-color: #424242; color: #fff; text-align: center; padding: 10px; position: fixed; bottom: 0; width: 100%; }
+      </style>
+    </head>
+    <body>
+      <header>
+        <h1>Quadro Quantitativo</h1>
+      </header>
+      <div class="container-form">
+        <form method="POST" enctype="multipart/form-data">
+          <div class="form-group">
+            <label for="modelo_file">Selecione o Modelo de Quadro (Excel):</label>
+            <input type="file" class="form-control-file" name="modelo_file" id="modelo_file" accept=".xlsx, .xls" required>
+          </div>
+          <div class="form-group">
+            <label for="lista_file">Selecione a Lista Piloto (Excel):</label>
+            <input type="file" class="form-control-file" name="lista_file" id="lista_file" accept=".xlsx, .xls" required>
+          </div>
+          <button type="submit" class="btn btn-primary">Gerar Quadro Quantitativo</button>
         </form>
         <br>
         <a href="{{ url_for('quadros') }}">Voltar para Quadros</a>
