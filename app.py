@@ -1,4 +1,4 @@
-from flask import Flask, request, redirect, url_for, render_template_string, jsonify, session, flash, send_file       
+from flask import Flask, request, redirect, url_for, render_template_string, jsonify, session, flash, send_file        
 import pandas as pd
 import os
 import uuid
@@ -8,8 +8,8 @@ from io import BytesIO
 from werkzeug.utils import secure_filename
 from functools import wraps
 import locale
-import xlrd  # Para ler arquivos .xls
-from openpyxl import load_workbook, Workbook  # Usado para trabalhar com XLSX e para converter XLS
+import xlrd  # Para ler arquivos .xls, se necessário
+from openpyxl import load_workbook, Workbook  # Usado para trabalhar com XLSX
 
 # Tenta definir a localidade para formatação de datas em português
 try:
@@ -42,7 +42,7 @@ def login_required(f):
         return f(*args, **kwargs)
     return decorated_function
 
-# Função para atualizar valor em célula mesclada
+# Função para atualizar valor em célula mesclada (mantém a mesclagem)
 def set_merged_cell_value(ws, cell_coord, value):
     for merged_range in ws.merged_cells.ranges:
         if cell_coord in merged_range:
@@ -57,10 +57,8 @@ def convert_xls_to_xlsx(file_like):
     """
     Converte um arquivo XLS (file-like) para um Workbook do openpyxl.
     """
-    # Lê o conteúdo do XLS usando xlrd
     book_xlrd = xlrd.open_workbook(file_contents=file_like.read())
     wb = Workbook()
-    # Remove a planilha padrão se houver e houver planilhas no arquivo XLS
     if "Sheet" in wb.sheetnames and len(book_xlrd.sheet_names()) > 0:
         std = wb.active
         wb.remove(std)
@@ -74,13 +72,12 @@ def convert_xls_to_xlsx(file_like):
 
 def load_workbook_model(file):
     """
-    Abre o arquivo do modelo. Se for XLSX, utiliza openpyxl.load_workbook;
-    se for XLS, converte para um Workbook do openpyxl.
+    Abre o arquivo do modelo XLSX (ou XLS convertendo-o para XLSX) preservando toda a formatação.
     """
     ext = os.path.splitext(file.filename)[1].lower()
     file.seek(0)
     if ext == '.xlsx':
-        return load_workbook(file)
+        return load_workbook(file, data_only=False)
     elif ext == '.xls':
         content = file.read()
         return convert_xls_to_xlsx(BytesIO(content))
@@ -112,13 +109,40 @@ def gerar_html_carteirinhas(arquivo_excel):
       flex-direction: column;
       align-items: center;
     }
-    #search-container { margin-top: 10px; }
-    #localizarAluno { padding: 0.2cm; font-size: 0.3cm; width: 3.5cm; }
-    .carteirinhas-container { width: 100%; max-width: 1100px; }
-    .page { margin-bottom: 40px; position: relative; }
-    .page-number { text-align: center; font-size: 0.3cm; font-weight: 600; color: #333; margin-bottom: 0.2cm; }
-    .cards-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 0.2cm; justify-items: center; }
-    .borda-pontilhada { border: 0.05cm dotted #ccc; padding: 0.1cm; position: relative; }
+    #search-container {
+      margin-top: 10px;
+    }
+    #localizarAluno {
+      padding: 0.2cm;
+      font-size: 0.3cm;
+      width: 3.5cm;
+    }
+    .carteirinhas-container {
+      width: 100%;
+      max-width: 1100px;
+    }
+    .page {
+      margin-bottom: 40px;
+      position: relative;
+    }
+    .page-number {
+      text-align: center;
+      font-size: 0.3cm;
+      font-weight: 600;
+      color: #333;
+      margin-bottom: 0.2cm;
+    }
+    .cards-grid {
+      display: grid;
+      grid-template-columns: repeat(2, 1fr);
+      gap: 0.2cm;
+      justify-items: center;
+    }
+    .borda-pontilhada {
+      border: 0.05cm dotted #ccc;
+      padding: 0.1cm;
+      position: relative;
+    }
     .borda-pontilhada::after {
       content: "✂️";
       position: absolute;
@@ -241,6 +265,10 @@ def gerar_html_carteirinhas(arquivo_excel):
         margin: 0;
         padding: 0;
         font-size: 16px;
+        background-color: #fff !important;
+      }
+      .page {
+        page-break-after: always;
       }
     }
     .imprimir-carteirinhas {
@@ -310,7 +338,6 @@ def gerar_html_carteirinhas(arquivo_excel):
       background: none;
       cursor: pointer;
     }
-    /* Novo estilo para o header, mais suave e moderno */
     header {
       background: linear-gradient(90deg, #283E51, #4B79A1);
       color: #fff;
@@ -337,25 +364,25 @@ def gerar_html_carteirinhas(arquivo_excel):
       <button class="alunos-sem-fotos-btn" onclick="mostrarRelatorioAlunosSemFotos()">Alunos sem fotos</button>
       <button class="imprimir-carteirinhas" onclick="imprimirCarteirinhas()">Imprimir Carteirinhas</button>
     </div>
-    <div id="search-container">
+    <div id="search-container" class="no-print">
       <input type="text" id="localizarAluno" placeholder="Localizar Aluno">
     </div>
 """
     contador = 0
     num_pagina = 1
     html_content += '<div class="page"><div class="page-number">Página ' + str(num_pagina) + '</div>'
-    html_content += '<button class="imprimir-pagina" onclick="imprimirPagina(this)">Imprimir Página</button>'
+    html_content += '<button class="imprimir-pagina no-print" onclick="imprimirPagina(this)">Imprimir Página</button>'
     html_content += '<div class="cards-grid">'
-    
+
     for _, row in dados.iterrows():
         if not str(row['RM']).strip() or str(row['RM']).strip() == "0":
             continue
-        
+
         nome = row['NOME']
         data_nasc = row['DATA NASC.']
         serie = row['SÉRIE']
         horario = row['HORÁRIO']
-        
+
         if pd.notna(data_nasc):
             try:
                 data_nasc = pd.to_datetime(data_nasc, errors='coerce')
@@ -367,7 +394,7 @@ def gerar_html_carteirinhas(arquivo_excel):
                 data_nasc = "Desconhecida"
         else:
             data_nasc = "Desconhecida"
-        
+
         ra = row['RA']
         sai_sozinho = row['SAI SOZINHO?']
         if sai_sozinho == 'Sim':
@@ -376,7 +403,7 @@ def gerar_html_carteirinhas(arquivo_excel):
         else:
             classe_cor = 'vermelho'
             status_texto = "Não Sai Sozinho"
-        
+
         allowed_exts = ['.jpg', '.jpeg', '.png', '.bmp', '.gif']
         found_photo = None
         for ext in allowed_exts:
@@ -384,14 +411,14 @@ def gerar_html_carteirinhas(arquivo_excel):
             if os.path.exists(caminho_foto):
                 found_photo = f"/static/fotos/{row['RM']}{ext}"
                 break
-        
+
         if not found_photo:
             alunos_sem_fotos_list.append({
                 'rm': row['RM'],
                 'nome': nome,
                 'serie': serie
             })
-        
+
         if found_photo:
             foto_tag = f'<img src="{found_photo}" alt="Foto" class="foto uploadable" data-rm="{row["RM"]}">'
         else:
@@ -401,9 +428,9 @@ def gerar_html_carteirinhas(arquivo_excel):
               <small style="font-size:0.2cm; opacity:0.5; color: grey;">Anexe uma foto</small>
             </div>
             '''
-        
+
         hidden_input = f'<input type="file" class="inline-upload" data-rm="{row["RM"]}" style="display:none;" accept="image/*">'
-        
+
         html_content += f"""
       <div class="borda-pontilhada">
         <div class="carteirinha">
@@ -447,7 +474,7 @@ def gerar_html_carteirinhas(arquivo_excel):
             if contador < len(dados):
                 num_pagina += 1
                 html_content += '<div class="page"><div class="page-number">Página ' + str(num_pagina) + '</div>'
-                html_content += '<button class="imprimir-pagina" onclick="imprimirPagina(this)">Imprimir Página</button>'
+                html_content += '<button class="imprimir-pagina no-print" onclick="imprimirPagina(this)">Imprimir Página</button>'
                 html_content += '<div class="cards-grid">'
     
     if contador % 4 != 0:
@@ -495,15 +522,14 @@ def gerar_html_carteirinhas(arquivo_excel):
     loadingOverlay.style.justifyContent = 'center';
     loadingOverlay.style.zIndex = '9999';
   
-    loadingOverlay.innerHTML = `
-      <div style="text-align: center; color: white; font-family: Arial, sans-serif;">
+    loadingOverlay.innerHTML = 
+      `<div style="text-align: center; color: white; font-family: Arial, sans-serif;">
         <svg width="3.0cm" height="4.5cm" viewBox="0 0 6.0 9.0" xmlns="http://www.w3.org/2000/svg">
           <rect x="0.3" y="0.3" width="5.4" height="8.4" rx="0.3" ry="0.3" stroke="white" stroke-width="0.1" fill="none" />
           <rect id="badge-fill" x="0.3" y="8.7" width="5.4" height="0" rx="0.3" ry="0.3" fill="white" />
         </svg>
         <p id="loading-text" style="margin-top: 0.2cm;">Gerando carteirinhas...</p>
-      </div>
-    `;
+      </div>`;
   
     document.body.appendChild(loadingOverlay);
   
@@ -665,43 +691,103 @@ def gerar_html_carteirinhas(arquivo_excel):
 """
     return render_template_string(html_content)
 
-def gerar_declaracao_escolar(file_path, rm, tipo):
-    planilha = pd.read_excel(file_path, sheet_name='LISTA CORRIDA')
-    def format_rm(x):
+def gerar_declaracao_escolar(file_path, rm, tipo, file_path2=None):
+    # Se o tipo for Fundamental, o arquivo possui cabeçalho e os dados padrão.
+    if session.get('declaracao_tipo') != "EJA":
+        planilha = pd.read_excel(file_path, sheet_name='LISTA CORRIDA')
+        def format_rm(x):
+            try:
+                return str(int(float(x)))
+            except:
+                return str(x)
+        planilha['RM_str'] = planilha['RM'].apply(format_rm)
         try:
-            return str(int(float(x)))
+            rm_num = str(int(float(rm)))
         except:
-            return str(x)
-    planilha['RM_str'] = planilha['RM'].apply(format_rm)
-    try:
-        rm_num = str(int(float(rm)))
-    except:
-        rm_num = str(rm)
-    aluno = planilha[planilha['RM_str'] == rm_num]
-    if aluno.empty:
-        return None
-    row = aluno.iloc[0]
-    nome = row['NOME']
-    serie = row['SÉRIE']
-    if isinstance(serie, str):
-        serie = re.sub(r"(\d+º)([A-Za-z])", r"\1 ano \2", serie)
-    data_nasc = row['DATA NASC.']
-    ra = row['RA']
-    if pd.notna(data_nasc):
-        try:
-            data_nasc = pd.to_datetime(data_nasc, errors='coerce')
-            if pd.notna(data_nasc):
-                data_nasc = data_nasc.strftime('%d/%m/%Y')
-            else:
+            rm_num = str(rm)
+        aluno = planilha[planilha['RM_str'] == rm_num]
+        if aluno.empty:
+            return None
+        row = aluno.iloc[0]
+        nome = row['NOME']
+        serie = row['SÉRIE']
+        if isinstance(serie, str):
+            serie = re.sub(r"(\d+º)([A-Za-z])", r"\1 ano \2", serie)
+        data_nasc = row['DATA NASC.']
+        ra = row['RA']
+        # Recupera o horário (coluna HORÁRIO) e trata caso esteja vazio
+        horario = row['HORÁRIO']
+        if pd.isna(horario) or not str(horario).strip():
+            horario = "Desconhecido"
+        else:
+            horario = str(horario).strip()
+        # Para declarações FUNDAMENTAL, o rótulo permanece "RA"
+        ra_label = "RA"
+        if pd.notna(data_nasc):
+            try:
+                data_nasc = pd.to_datetime(data_nasc, errors='coerce')
+                if pd.notna(data_nasc):
+                    data_nasc = data_nasc.strftime('%d/%m/%Y')
+                else:
+                    data_nasc = "Desconhecida"
+            except Exception as e:
                 data_nasc = "Desconhecida"
-        except Exception as e:
+        else:
             data_nasc = "Desconhecida"
     else:
-        data_nasc = "Desconhecida"
-    
+        # Para declaração EJA, usamos o novo mapeamento.
+        # Use skiprows=1 para descartar a primeira linha (cabeçalho) que causa o erro.
+        df = pd.read_excel(file_path, sheet_name=0, header=None, skiprows=1)
+        # Mapeamento: Série = coluna A (índice 0); RM = coluna C (índice 2); Nome = coluna D (índice 3);
+        # NASC = coluna G (índice 6); RA = coluna H (índice 7) – se igual a 0, usar RG da coluna I (índice 8)
+        df['RM_str'] = df.iloc[:,2].apply(lambda x: str(int(x)) if pd.notna(x) and float(x) != 0 else "")
+        df['NOME'] = df.iloc[:,3]
+        df['NASC.'] = df.iloc[:,6]
+        def get_ra(row):
+            try:
+                val = row.iloc[7]
+                if pd.isna(val) or float(val) == 0:
+                    return row.iloc[8]
+                else:
+                    return val
+            except:
+                return row.iloc[7]
+        df['RA'] = df.apply(get_ra, axis=1)
+        df['SÉRIE'] = df.iloc[:,0]
+        try:
+            rm_num = str(int(float(rm)))
+        except:
+            rm_num = str(rm)
+        aluno = df[df['RM_str'] == rm_num]
+        if aluno.empty:
+            return None
+        row = aluno.iloc[0]
+        nome = row['NOME']
+        serie = row['SÉRIE']
+        if isinstance(serie, str):
+            serie = re.sub(r"(\d+º)([A-Za-z])", r"\1 ano \2", serie)
+        data_nasc = row['NASC.']
+        ra = row['RA']
+        # Verifica se o valor original da coluna RA (índice 7) está vazio ou zero e, assim, define o rótulo
+        original_ra = row.iloc[7]
+        if pd.isna(original_ra) or (isinstance(original_ra, (int, float)) and float(original_ra) == 0):
+            ra_label = "RG"
+        else:
+            ra_label = "RA"
+        if pd.notna(data_nasc):
+            try:
+                data_nasc = pd.to_datetime(data_nasc, errors='coerce')
+                if pd.notna(data_nasc):
+                    data_nasc = data_nasc.strftime('%d/%m/%Y')
+                else:
+                    data_nasc = "Desconhecida"
+            except Exception as e:
+                data_nasc = "Desconhecida"
+        else:
+            data_nasc = "Desconhecida"
     now = datetime.now()
-    meses = {1: "janeiro", 2: "fevereiro", 3: "março", 4: "abril", 5: "maio", 6: "junho",
-             7: "julho", 8: "agosto", 9: "setembro", 10: "outubro", 11: "novembro", 12: "dezembro"}
+    meses = {1:"janeiro", 2:"fevereiro", 3:"março", 4:"abril", 5:"maio", 6:"junho",
+             7:"julho", 8:"agosto", 9:"setembro", 10:"outubro", 11:"novembro", 12:"dezembro"}
     mes = meses[now.month].capitalize()
     data_extenso = f"Praia Grande, {now.day:02d} de {mes} de {now.year}"
     
@@ -721,34 +807,76 @@ def gerar_declaracao_escolar(file_path, rm, tipo):
 '''
     if tipo == "Escolaridade":
         titulo = "Declaração de Escolaridade"
-        declaracao_text = (
-            f"Declaro, para os devidos fins, que o(a) aluno(a) <strong><u>{nome}</u></strong>, "
-            f"portador(a) do RA <strong><u>{ra}</u></strong>, nascido(a) em <strong><u>{data_nasc}</u></strong>, "
-            f"encontra-se regularmente matriculado(a) na E.M José Padin Mouta, cursando atualmente o "
-            f"<strong><u>{serie}</u></strong>."
-        )
+        if session.get('declaracao_tipo') == "EJA":
+            declaracao_text = (
+                f"Declaro, para os devidos fins, que o(a) aluno(a) <strong><u>{nome}</u></strong>, "
+                f"portador(a) do {ra_label} <strong><u>{ra}</u></strong>, nascido(a) em <strong><u>{data_nasc}</u></strong>, "
+                f"encontra-se regularmente matriculado(a) na E.M José Padin Mouta, cursando atualmente o "
+                f"<strong><u>{serie}</u></strong>."
+            )
+        else:
+            declaracao_text = (
+                f"Declaro, para os devidos fins, que o(a) aluno(a) <strong><u>{nome}</u></strong>, "
+                f"portador(a) do RA <strong><u>{ra}</u></strong>, nascido(a) em <strong><u>{data_nasc}</u></strong>, "
+                f"encontra-se regularmente matriculado(a) na E.M José Padin Mouta, cursando atualmente o "
+                f"<strong><u>{serie}</u></strong> no horário de aula: <strong><u>{horario}</u></strong>."
+            )
     elif tipo == "Transferencia":
         titulo = "Declaração de Transferência"
-        declaracao_text = (
-            f"Declaro, para os devidos fins, que o(a) aluno(a) <strong><u>{nome}</u></strong>, "
-            f"portador(a) do RA <strong><u>{ra}</u></strong>, nascido(a) em <strong><u>{data_nasc}</u></strong>, "
-            f"solicitou transferência de nossa unidade escolar na data de hoje, estando apto(a) a cursar o "
-            f"<strong><u>{serie}</u></strong>."
-        )
+        if session.get('declaracao_tipo') == "EJA":
+            declaracao_text = (
+                f"Declaro, para os devidos fins, que o(a) aluno(a) <strong><u>{nome}</u></strong>, "
+                f"portador(a) do {ra_label} <strong><u>{ra}</u></strong>, nascido(a) em <strong><u>{data_nasc}</u></strong>, "
+                f"solicitou transferência de nossa unidade escolar na data de hoje, estando apto(a) a cursar o "
+                f"<strong><u>{serie}</u></strong>."
+            )
+        else:
+            # Para Fundamental, ajusta o texto e remove a letra extra da série
+            serie_mod = re.sub(r"^(\d+º).*", r"\1 ano", serie)
+            declaracao_text = (
+                f"Declaro, para os devidos fins, que o(a) responsável do(a) aluno(a) <strong><u>{nome}</u></strong>, "
+                f"portador(a) do RA <strong><u>{ra}</u></strong>, nascido(a) em <strong><u>{data_nasc}</u></strong>, "
+                f"compareceu a nossa unidade escolar e solicitou transferência na data de hoje, o aluno está apto(a) a cursar o "
+                f"<strong><u>{serie_mod}</u></strong>."
+            )
     elif tipo == "Conclusão":
         titulo = "Declaração de Conclusão"
-        match = re.search(r"(\d+)º\s*ano", serie)
-        if match:
-            next_year = int(match.group(1)) + 1
-            series_text = f"{next_year}º ano"
+        if session.get('declaracao_tipo') == "EJA":
+            mapping = {
+                "1ª SÉRIE E.F": "2ª SÉRIE E.F",
+                "2ª SÉRIE E.F": "3ª SÉRIE E.F",
+                "3ª SÉRIE E.F": "4ª SÉRIE E.F",
+                "4ª SÉRIE E.F": "5ª SÉRIE E.F",
+                "5ª SÉRIE E.F": "6ª SÉRIE E.F",
+                "6ª SÉRIE E.F": "7ª SÉRIE E.F",
+                "7ª SÉRIE E.F": "8ª SÉRIE E.F",
+                "8ª SÉRIE E.F": "1ª SÉRIE E.M",
+                "1ª SÉRIE E.M": "2ª SÉRIE E.M",
+                "2ª SÉRIE E.M": "3ª SÉRIE E.M",
+                "3ª SÉRIE E.M": "ENSINO SUPERIOR"
+            }
+            series_text = mapping.get(serie, "a série subsequente")
         else:
-            series_text = "a série subsequente"
-        declaracao_text = (
-            f"Declaro, para os devidos fins, que o(a) aluno(a) <strong><u>{nome}</u></strong>, "
-            f"portador(a) do RA <strong><u>{ra}</u></strong>, nascido(a) em <strong><u>{data_nasc}</u></strong>, "
-            f"concluiu com êxito o <strong><u>{serie}</u></strong>, estando apto(a) a ingressar no "
-            f"<strong><u>{series_text}</u></strong>."
-        )
+            match = re.search(r"(\d+)º\s*ano", serie)
+            if match:
+                next_year = int(match.group(1)) + 1
+                series_text = f"{next_year}º ano"
+            else:
+                series_text = "a série subsequente"
+        if session.get('declaracao_tipo') == "EJA":
+            declaracao_text = (
+                f"Declaro, para os devidos fins, que o(a) aluno(a) <strong><u>{nome}</u></strong>, "
+                f"portador(a) do {ra_label} <strong><u>{ra}</u></strong>, nascido(a) em <strong><u>{data_nasc}</u></strong>, "
+                f"concluiu com êxito o <strong><u>{serie}</u></strong>, estando apto(a) a ingressar no "
+                f"<strong><u>{series_text}</u></strong>."
+            )
+        else:
+            declaracao_text = (
+                f"Declaro, para os devidos fins, que o(a) aluno(a) <strong><u>{nome}</u></strong>, "
+                f"portador(a) do RA <strong><u>{ra}</u></strong>, nascido(a) em <strong><u>{data_nasc}</u></strong>, "
+                f"concluiu com êxito o <strong><u>{serie}</u></strong>, estando apto(a) a ingressar no "
+                f"<strong><u>{series_text}</u></strong>."
+            )
     else:
         titulo = "Declaração"
         declaracao_text = "Tipo de declaração inválido."
@@ -814,25 +942,21 @@ def gerar_declaracao_escolar(file_path, rm, tipo):
       font-size: 14px;
       color: #555;
     }}
-    /* A declaração toda ficará em uma única folha */
     @media print {{
       .no-print {{ display: none !important; }}
       body {{
         margin: 0;
         padding: 0.5cm;
-        font-size: 20px;
+        font-size: 16px;
       }}
       .declaration-bottom {{
          margin-top: 10cm;
       }}
-
       .date {{
          margin-top: 2cm;
       }}
-
     }}
     {additional_css}
-    /* Novo estilo para o header */
     header {{
       background: linear-gradient(90deg, #283E51, #4B79A1);
       color: #fff;
@@ -1297,15 +1421,14 @@ def carteirinhas():
             loadingOverlay.style.alignItems = 'center';
             loadingOverlay.style.justifyContent = 'center';
             loadingOverlay.style.zIndex = '9999';
-            loadingOverlay.innerHTML = `
-              <div style="text-align: center; color: white; font-family: Arial, sans-serif;">
+            loadingOverlay.innerHTML = 
+              `<div style="text-align: center; color: white; font-family: Arial, sans-serif;">
                 <svg width="3.0cm" height="4.5cm" viewBox="0 0 6.0 9.0" xmlns="http://www.w3.org/2000/svg">
                   <rect x="0.3" y="0.3" width="5.4" height="8.4" rx="0.3" ry="0.3" stroke="white" stroke-width="0.1" fill="none" />
                   <rect id="badge-fill" x="0.3" y="8.7" width="5.4" height="0" rx="0.3" ry="0.3" fill="white" />
                 </svg>
                 <p id="loading-text" style="margin-top: 0.2cm;">Gerando carteirinhas...</p>
-              </div>
-            `;
+              </div>`;
             document.body.appendChild(loadingOverlay);
             let fillHeight = 0;
             const maxHeight = 8.4;
@@ -1333,15 +1456,14 @@ def carteirinhas():
             var container = document.getElementById('multi-upload-fields');
             var group = document.createElement('div');
             group.className = 'multi-upload-group';
-            group.innerHTML = `
-              <div class="form-group">
+            group.innerHTML = 
+              `<div class="form-group">
                 <label>RM do Aluno:</label>
                 <input type="text" class="form-control" name="rm[]" placeholder="Digite o RM">
               </div>
               <div class="form-group">
                 <input type="file" class="form-control-file" name="foto_file[]" accept="image/*">
-              </div>
-            `;
+              </div>`;
             container.appendChild(group);
           });
         </script>
@@ -1350,6 +1472,7 @@ def carteirinhas():
     '''
     return render_template_string(carteirinhas_html)
 
+# Rota para Declaração Escolar para DECLARAÇÃO FUNDAMENTAL (uma lista piloto)
 @app.route('/declaracao/upload', methods=['GET', 'POST'])
 @login_required
 def declaracao_upload():
@@ -1366,6 +1489,7 @@ def declaracao_upload():
         file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
         file.save(file_path)
         session['declaracao_excel'] = file_path
+        session['declaracao_tipo'] = "Fundamental"
         return redirect(url_for('declaracao_select'))
     
     upload_form = '''
@@ -1373,7 +1497,7 @@ def declaracao_upload():
     <html lang="pt-br">
     <head>
       <meta charset="utf-8">
-      <title>Declaração Escolar - Anexar Lista Piloto</title>
+      <title>Declaração Escolar - Fundamental</title>
       <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
       <style>
@@ -1419,15 +1543,15 @@ def declaracao_upload():
     </head>
     <body>
       <header>
-        <h1>Declaração Escolar - Anexar Lista Piloto</h1>
+        <h1>Declaração Escolar - Fundamental</h1>
       </header>
       <div class="container container-form">
         <form method="POST" enctype="multipart/form-data">
           <div class="form-group">
-            <label for="excel_file">Selecione o arquivo Excel:</label>
+            <label for="excel_file">Selecione a lista piloto do Fundamental:</label>
             <input type="file" class="form-control-file" name="excel_file" id="excel_file" accept=".xlsx, .xls" required>
           </div>
-          <button type="submit" class="btn btn-primary">Anexar Lista</button>
+          <button type="submit" class="btn btn-primary">Anexar Lista do Fundamental</button>
         </form>
       </div>
       <footer>
@@ -1438,22 +1562,138 @@ def declaracao_upload():
     '''
     return render_template_string(upload_form)
 
+# Nova rota para Declaração EJA – upload da lista EJA
+@app.route('/declaracao/upload_eja', methods=['GET', 'POST'])
+@login_required
+def declaracao_upload_eja():
+    if request.method == 'POST':
+        if 'excel_file' not in request.files:
+            flash("Nenhum arquivo enviado.", "error")
+            return redirect(url_for('declaracao_upload_eja'))
+        file = request.files['excel_file']
+        if file.filename == '':
+            flash("Nenhum arquivo selecionado.", "error")
+            return redirect(url_for('declaracao_upload_eja'))
+        filename = secure_filename(file.filename)
+        unique_filename = f"declaracao2_{uuid.uuid4().hex}_{filename}"
+        file_path = os.path.join(app.config['UPLOAD_FOLDER'], unique_filename)
+        file.save(file_path)
+        session['declaracao_excel'] = file_path  # Para EJA, usamos o mesmo nome de sessão
+        session['declaracao_tipo'] = "EJA"
+        return redirect(url_for('declaracao_select'))
+    
+    upload_form = '''
+    <!doctype html>
+    <html lang="pt-br">
+    <head>
+      <meta charset="utf-8">
+      <title>Declaração Escolar - EJA</title>
+      <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
+      <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
+      <style>
+        body {
+          background: #eef2f3;
+          font-family: 'Montserrat', sans-serif;
+        }
+        header {
+          background: linear-gradient(90deg, #283E51, #4B79A1);
+          color: #fff;
+          padding: 20px;
+          text-align: center;
+          border-bottom: 3px solid #1d2d3a;
+          border-radius: 0 0 15px 15px;
+          box-shadow: 0 4px 6px rgba(0,0,0,0.1);
+        }
+        .container-form {
+          background: #fff;
+          padding: 40px;
+          border-radius: 10px;
+          box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+          margin: 40px auto;
+          max-width: 600px;
+          text-align: center;
+        }
+        .btn-primary {
+          background-color: #283E51;
+          border: none;
+        }
+        .btn-primary:hover {
+          background-color: #1d2d3a;
+        }
+        footer {
+          background-color: #424242;
+          color: #fff;
+          text-align: center;
+          padding: 10px;
+          position: fixed;
+          bottom: 0;
+          width: 100%;
+        }
+      </style>
+    </head>
+    <body>
+      <header>
+        <h1>Declaração Escolar - EJA</h1>
+      </header>
+      <div class="container container-form">
+        <form method="POST" enctype="multipart/form-data">
+          <div class="form-group">
+            <label for="excel_file">Selecione a lista piloto da EJA em Excel:</label>
+            <input type="file" class="form-control-file" name="excel_file" id="excel_file" accept=".xlsx, .xls" required>
+          </div>
+          <button type="submit" class="btn btn-primary">Anexar Lista EJA</button>
+        </form>
+      </div>
+      <footer>
+        Desenvolvido por Nilson Cruz © 2025. Todos os direitos reservados.
+      </footer>
+    </body>
+    </html>
+    '''
+    return render_template_string(upload_form)
+
+# Rota de seleção dos alunos para gerar a declaração
 @app.route('/declaracao/select', methods=['GET', 'POST'])
 @login_required
 def declaracao_select():
     file_path = session.get('declaracao_excel')
     if not file_path or not os.path.exists(file_path):
         flash("Arquivo Excel não encontrado. Por favor, anexe a lista piloto.", "error")
-        return redirect(url_for('declaracao_upload'))
+        if session.get('declaracao_tipo') == "EJA":
+            return redirect(url_for('declaracao_upload_eja'))
+        else:
+            return redirect(url_for('declaracao_upload'))
     
-    planilha = pd.read_excel(file_path, sheet_name='LISTA CORRIDA')
-    def format_rm(x):
-        try:
-            return str(int(float(x)))
-        except:
-            return str(x)
-    planilha['RM_str'] = planilha['RM'].apply(format_rm)
-    alunos = planilha[planilha['RM_str'] != "0"][['RM_str', 'NOME']].drop_duplicates()
+    # Se for EJA, a lista possui layout diferente. Use skiprows=1 para descartar a linha de cabeçalho.
+    if session.get('declaracao_tipo') == "EJA":
+        df = pd.read_excel(file_path, sheet_name=0, header=None, skiprows=1)
+        # Mapeamento: Série = coluna A (índice 0); RM = coluna C (índice 2); Nome = coluna D (índice 3);
+        # NASC = coluna G (índice 6); RA = coluna H (índice 7) – se igual a 0, usar RG da coluna I (índice 8)
+        df['RM_str'] = df.iloc[:,2].apply(lambda x: str(int(x)) if pd.notna(x) and float(x) != 0 else "")
+        df['NOME'] = df.iloc[:,3]
+        df['NASC.'] = df.iloc[:,6]
+        def get_ra(row):
+            try:
+                val = row.iloc[7]
+                if pd.isna(val) or float(val) == 0:
+                    return row.iloc[8]
+                else:
+                    return val
+            except:
+                return row.iloc[7]
+        df['RA'] = df.apply(get_ra, axis=1)
+        df['SÉRIE'] = df.iloc[:,0]
+        alunos = df[df['RM_str'] != ""][['RM_str', 'NOME']].drop_duplicates()
+    else:
+        planilha = pd.read_excel(file_path, sheet_name='LISTA CORRIDA')
+        def format_rm(x):
+            try:
+                return str(int(float(x)))
+            except:
+                return str(x)
+        planilha['RM_str'] = planilha['RM'].apply(format_rm)
+        alunos = planilha[planilha['RM_str'] != "0"][['RM_str', 'NOME']].drop_duplicates()
+    
     options_html = ""
     for _, row in alunos.iterrows():
         rm_str = row['RM_str']
@@ -1573,63 +1813,7 @@ def declaracao_tipo():
         if tipo == 'Fundamental':
             return redirect(url_for('declaracao_upload'))
         elif tipo == 'EJA':
-            msg_html = '''
-            <!doctype html>
-            <html lang="pt-br">
-            <head>
-                 <meta charset="utf-8">
-                 <title>Declaração EJA - Em Desenvolvimento</title>
-                 <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
-                 <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
-                 <style>
-                 body {
-                     background: #eef2f3;
-                     font-family: 'Montserrat', sans-serif;
-                 }
-                 header {
-                     background: linear-gradient(90deg, #283E51, #4B79A1);
-                     color: #fff;
-                     padding: 20px;
-                     text-align: center;
-                     border-bottom: 3px solid #1d2d3a;
-                     border-radius: 0 0 15px 15px;
-                     box-shadow: 0 4px 6px rgba(0,0,0,0.1);
-                 }
-                 .container-msg {
-                     background: #fff;
-                     padding: 40px;
-                     border-radius: 10px;
-                     box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-                     margin: 40px auto;
-                     max-width: 600px;
-                     text-align: center;
-                 }
-                 footer {
-                     background-color: #424242;
-                     color: #fff;
-                     text-align: center;
-                     padding: 10px;
-                     position: fixed;
-                     bottom: 0;
-                     width: 100%;
-                 }
-                 </style>
-            </head>
-            <body>
-                 <header>
-                     <h1>Declaração EJA</h1>
-                 </header>
-                 <div class="container-msg">
-                     <p>Declaração EJA está em desenvolvimento.</p>
-                     <a href="{{ url_for('dashboard') }}" class="btn btn-primary">Voltar ao Dashboard</a>
-                 </div>
-                 <footer>
-                     Desenvolvido por Nilson Cruz © 2025. Todos os direitos reservados.
-                 </footer>
-            </body>
-            </html>
-            '''
-            return render_template_string(msg_html)
+            return redirect(url_for('declaracao_upload_eja'))
     form_html = '''
     <!doctype html>
     <html lang="pt-br">
@@ -1812,9 +1996,9 @@ def quadros():
           <h2>Inclusão</h2>
           <p>Gerar quadro de inclusão.</p>
         </div>
-        <div class="option-card" onclick="window.location.href='{{ url_for('quadros_quantitativo') }}'">
-          <h2>Quantitativo</h2>
-          <p>Gerar quadro quantitativo.</p>
+        <div class="option-card" onclick="window.location.href='{{ url_for('quadro_atendimento_mensal') }}'">
+          <h2>Atendimento Mensal</h2>
+          <p>Gerar quadro de atendimento mensal.</p>
         </div>
         <div class="option-card" onclick="alert('Funcionalidade Transferências em desenvolvimento')">
           <h2>Transferências</h2>
@@ -1832,24 +2016,27 @@ def quadros():
     '''
     return render_template_string(quadros_html)
 
-# Rota para Quadro de Inclusão (já existente)
+# Rota para Quadro de Inclusão (permanece inalterada)
 @app.route('/quadros/inclusao', methods=['GET', 'POST'])
 @login_required
 def quadros_inclusao():
     if request.method == 'POST':
-        if 'modelo_file' not in request.files or 'lista_file' not in request.files:
-            flash("Arquivos não enviados.", "error")
+        if 'lista_file' not in request.files:
+            flash("Arquivo da lista piloto não enviado.", "error")
             return redirect(url_for('quadros_inclusao'))
-        modelo_file = request.files['modelo_file']
         lista_file = request.files['lista_file']
-        if modelo_file.filename == '' or lista_file.filename == '':
-            flash("Selecione os dois arquivos.", "error")
+        if lista_file.filename == '':
+            flash("Selecione a lista piloto.", "error")
+            return redirect(url_for('quadros_inclusao'))
+        model_path = os.path.join("modelos", "Quadro de Alunos com Deficiência - Modelo.xlsx")
+        if not os.path.exists(model_path):
+            flash("Modelo de Inclusão não encontrado.", "error")
             return redirect(url_for('quadros_inclusao'))
         try:
-            modelo_file.seek(0)
-            wb = load_workbook_model(modelo_file)
+            with open(model_path, "rb") as f:
+                wb = load_workbook(f, data_only=False)
         except Exception as e:
-            flash(f"Erro ao ler o arquivo de modelo: {str(e)}", "error")
+            flash(f"Erro ao ler o modelo de inclusão: {str(e)}", "error")
             return redirect(url_for('quadros_inclusao'))
         ws = wb.active
         set_merged_cell_value(ws, "C3", "Luciana Rocha Augustinho")
@@ -1865,7 +2052,7 @@ def quadros_inclusao():
         except Exception as e:
             flash("Erro ao ler a Lista Piloto.", "error")
             return redirect(url_for('quadros_inclusao'))
-        if len(df.columns) < 16:
+        if len(df.columns) < 21:
             flash("O arquivo da Lista Piloto não possui colunas suficientes.", "error")
             return redirect(url_for('quadros_inclusao'))
         inclusion_col = df.columns[13]
@@ -1912,7 +2099,6 @@ def quadros_inclusao():
                 observacoes = str(row[df.columns[18]]).strip() if len(df.columns) > 18 else ""
                 cadeira = str(row[df.columns[19]]).strip() if len(df.columns) > 19 else ""
                 adequacoes = cadeira
-                atendimentos = "-"
                 ws.cell(row=current_row, column=2, value=nivel)
                 ws.cell(row=current_row, column=3, value=turma)
                 ws.cell(row=current_row, column=4, value=periodo)
@@ -1922,16 +2108,23 @@ def quadros_inclusao():
                 ws.cell(row=current_row, column=8, value=professor)
                 ws.cell(row=current_row, column=9, value=plano)
                 ws.cell(row=current_row, column=10, value=aee)
-                ws.cell(row=current_row, column=11, value=deficiencia)
+                cell_def = ws.cell(row=current_row, column=11)
+                cell_def.value = deficiencia
                 ws.cell(row=current_row, column=12, value=observacoes)
                 ws.cell(row=current_row, column=13, value=cadeira)
                 ws.cell(row=current_row, column=14, value=adequacoes)
-                ws.cell(row=current_row, column=15, value=atendimentos)
+                ws.cell(row=current_row, column=15, value=row[df.columns[20]])
                 current_row += 1
+        for dv in ws.data_validations.dataValidation:
+            if dv.type == "list" and "K" in str(dv.sqref):
+                dv.sqref = f"K{start_row}:K{current_row-1}"
+                break
         output = BytesIO()
         wb.save(output)
         output.seek(0)
-        filename = f"Quadro_Inclusao_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        meses = {1:"janeiro", 2:"fevereiro", 3:"março", 4:"abril", 5:"maio", 6:"junho", 7:"julho", 8:"agosto", 9:"setembro", 10:"outubro", 11:"novembro", 12:"dezembro"}
+        mes = meses[datetime.now().month].capitalize()
+        filename = f"Quadro de Inclusão - {mes} - E.M José Padin Mouta.xlsx"
         return send_file(output, as_attachment=True, download_name=filename, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     
     upload_html = '''
@@ -1966,10 +2159,6 @@ def quadros_inclusao():
       <div class="container-form">
         <form method="POST" enctype="multipart/form-data">
           <div class="form-group">
-            <label for="modelo_file">Selecione o Modelo de Quadro (Excel):</label>
-            <input type="file" class="form-control-file" name="modelo_file" id="modelo_file" accept=".xlsx, .xls" required>
-          </div>
-          <div class="form-group">
             <label for="lista_file">Selecione a Lista Piloto (Excel):</label>
             <input type="file" class="form-control-file" name="lista_file" id="lista_file" accept=".xlsx, .xls" required>
           </div>
@@ -1986,46 +2175,41 @@ def quadros_inclusao():
     '''
     return render_template_string(upload_html)
 
-# Rota para Quadro Quantitativo – agora preenchido com dados da aba "Total de Alunos"
-@app.route('/quadros/quantitativo', methods=['GET', 'POST'])
+# Rota para Quadro de Atendimento Mensal – permanece inalterada
+@app.route('/quadros/atendimento_mensal', methods=['GET', 'POST'])
 @login_required
-def quadros_quantitativo():
+def quadro_atendimento_mensal():
     if request.method == 'POST':
-        if 'modelo_file' not in request.files or 'lista_file' not in request.files:
-            flash("Arquivos não enviados.", "error")
-            return redirect(url_for('quadros_quantitativo'))
-        modelo_file = request.files['modelo_file']
+        if 'lista_file' not in request.files:
+            flash("Arquivo da lista piloto não enviado.", "error")
+            return redirect(url_for('quadro_atendimento_mensal'))
         lista_file = request.files['lista_file']
-        if modelo_file.filename == '' or lista_file.filename == '':
-            flash("Selecione os dois arquivos.", "error")
-            return redirect(url_for('quadros_quantitativo'))
-        
-        # Para o arquivo modelo, aceitamos XLS ou XLSX
+        if lista_file.filename == '': 
+            flash("Selecione a lista piloto.", "error")
+            return redirect(url_for('quadro_atendimento_mensal'))
+        model_path = os.path.join("modelos", "Quadro de Atendimento Mensal - Modelo.xlsx")
+        if not os.path.exists(model_path):
+            flash("Modelo Atendimento Mensal não encontrado.", "error")
+            return redirect(url_for('quadro_atendimento_mensal'))
         try:
-            wb_modelo = load_workbook_model(modelo_file)
+            with open(model_path, "rb") as f:
+                wb_modelo = load_workbook(f, data_only=False)
         except Exception as e:
-            flash(f"Erro ao ler o arquivo de modelo: {str(e)}", "error")
-            return redirect(url_for('quadros_quantitativo'))
+            flash(f"Erro ao ler o modelo de atendimento mensal: {str(e)}", "error")
+            return redirect(url_for('quadro_atendimento_mensal'))
         
-        # Preencher na segunda aba (Aba 2: Fundamental..EJA) se existir; caso contrário, usa a aba ativa
-        if len(wb_modelo.sheetnames) >= 2:
-            ws_modelo = wb_modelo.worksheets[1]
-        else:
-            ws_modelo = wb_modelo.active
-
-        # Preencher o modelo conforme especificado (usando set_merged_cell_value para tratar células mescladas)
-        set_merged_cell_value(ws_modelo, "B5", "E.M José Padin Mouta")
-        set_merged_cell_value(ws_modelo, "C6", "Rafael Fernando da Silva")
-        set_merged_cell_value(ws_modelo, "B7", "46034")
+        set_merged_cell_value(wb_modelo.worksheets[1], "B5", "E.M José Padin Mouta")
+        set_merged_cell_value(wb_modelo.worksheets[1], "C6", "Rafael Fernando da Silva")
+        set_merged_cell_value(wb_modelo.worksheets[1], "B7", "46034")
         current_month = datetime.now().strftime("%m")
-        set_merged_cell_value(ws_modelo, "A13", f"{current_month}/2025")
+        set_merged_cell_value(wb_modelo.worksheets[1], "A13", f"{current_month}/2025")
+        
         try:
             lista_file.seek(0)
             wb_lista = load_workbook(lista_file, data_only=True)
         except Exception as e:
             flash("Erro ao ler o arquivo da lista piloto.", "error")
-            return redirect(url_for('quadros_quantitativo'))
-        # Busca a aba "Total de Alunos" de forma case-insensitive
+            return redirect(url_for('quadro_atendimento_mensal'))
         sheet_name = None
         for name in wb_lista.sheetnames:
             if name.strip().lower() == "total de alunos":
@@ -2033,20 +2217,50 @@ def quadros_quantitativo():
                 break
         if not sheet_name:
             flash("A aba 'Total de Alunos' não foi encontrada na lista piloto.", "error")
-            return redirect(url_for('quadros_quantitativo'))
+            return redirect(url_for('quadro_atendimento_mensal'))
         ws_total = wb_lista[sheet_name]
-        # Preencher linhas 37 a 42 utilizando os valores da aba "Total de Alunos"
-        for r in range(37, 43):
-            source_row = r - 31  # linhas 6 a 11
-            value_B = ws_total.cell(row=source_row, column=7).value  # coluna G
-            value_C = ws_total.cell(row=source_row, column=8).value  # coluna H
+        ws_modelo = wb_modelo.worksheets[1]
+        
+        for r, source_row in zip(range(55, 57), range(13, 15)):
+            value_B = ws_total.cell(row=source_row, column=7).value
+            value_C = ws_total.cell(row=source_row, column=8).value
             set_merged_cell_value(ws_modelo, f"B{r}", value_B)
             set_merged_cell_value(ws_modelo, f"C{r}", value_C)
             set_merged_cell_value(ws_modelo, f"D{r}", f"=B{r}+C{r}")
+        
+        for r, source_row in zip(range(57, 61), range(15, 19)):
+            value_B = ws_total.cell(row=source_row, column=7).value
+            value_C = ws_total.cell(row=source_row, column=8).value
+            set_merged_cell_value(ws_modelo, f"B{r}", value_B)
+            set_merged_cell_value(ws_modelo, f"C{r}", value_C)
+            set_merged_cell_value(ws_modelo, f"D{r}", f"=B{r}+C{r}")
+        
+        for r, source_row in zip(range(73, 80), range(20, 27)):
+            value_B = ws_total.cell(row=source_row, column=7).value
+            value_C = ws_total.cell(row=source_row, column=8).value
+            set_merged_cell_value(ws_modelo, f"B{r}", value_B)
+            set_merged_cell_value(ws_modelo, f"C{r}", value_C)
+            set_merged_cell_value(ws_modelo, f"D{r}", f"=B{r}+C{r}")
+        
+        for r, source_row in zip(range(91, 98), range(28, 35)):
+            value_B = ws_total.cell(row=source_row, column=7).value
+            value_C = ws_total.cell(row=source_row, column=8).value
+            set_merged_cell_value(ws_modelo, f"B{r}", value_B)
+            set_merged_cell_value(ws_modelo, f"C{r}", value_C)
+            set_merged_cell_value(ws_modelo, f"D{r}", f"=B{r}+C{r}")
+        
+        value_R20 = ws_total.cell(row=37, column=9).value
+        set_merged_cell_value(ws_modelo, "R20", value_R20)
+        set_merged_cell_value(ws_modelo, "R24", 0)
+        value_R28 = ws_total.cell(row=39, column=9).value
+        set_merged_cell_value(ws_modelo, "R28", value_R28)
+        
         output = BytesIO()
         wb_modelo.save(output)
         output.seek(0)
-        filename = f"Quadro_Quantitativo_{datetime.now().strftime('%Y%m%d_%H%M%S')}.xlsx"
+        meses = {1:"janeiro", 2:"fevereiro", 3:"março", 4:"abril", 5:"maio", 6:"junho", 7:"julho", 8:"agosto", 9:"setembro", 10:"outubro", 11:"novembro", 12:"dezembro"}
+        mes = meses[datetime.now().month].capitalize()
+        filename = f"Quadro de Atendimento Mensal - {mes} - E.M José Padin Mouta.xlsx"
         return send_file(output, as_attachment=True, download_name=filename, mimetype="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet")
     
     upload_html = '''
@@ -2054,7 +2268,7 @@ def quadros_quantitativo():
     <html lang="pt-br">
     <head>
       <meta charset="utf-8">
-      <title>Quadro Quantitativo - E.M José Padin Mouta</title>
+      <title>Quadro de Atendimento Mensal - E.M José Padin Mouta</title>
       <link rel="stylesheet" href="https://stackpath.bootstrapcdn.com/bootstrap/4.5.2/css/bootstrap.min.css">
       <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@400;600&display=swap" rel="stylesheet">
       <style>
@@ -2076,19 +2290,15 @@ def quadros_quantitativo():
     </head>
     <body>
       <header>
-        <h1>Quadro Quantitativo</h1>
+        <h1>Quadro de Atendimento Mensal</h1>
       </header>
       <div class="container-form">
         <form method="POST" enctype="multipart/form-data">
           <div class="form-group">
-            <label for="modelo_file">Selecione o Modelo de Quadro (Excel):</label>
-            <input type="file" class="form-control-file" name="modelo_file" id="modelo_file" accept=".xlsx, .xls" required>
-          </div>
-          <div class="form-group">
             <label for="lista_file">Selecione a Lista Piloto (Excel):</label>
             <input type="file" class="form-control-file" name="lista_file" id="lista_file" accept=".xlsx, .xls" required>
           </div>
-          <button type="submit" class="btn btn-primary">Gerar Quadro Quantitativo</button>
+          <button type="submit" class="btn btn-primary">Gerar Quadro de Atendimento Mensal</button>
         </form>
         <br>
         <a href="{{ url_for('quadros') }}">Voltar para Quadros</a>
