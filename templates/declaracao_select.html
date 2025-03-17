@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}Declaração Escolar - Seleção de Aluno{% endblock %}
+{% block content %}
+<div class="container-form">
+  <h1>Declaração Escolar</h1>
+  <p>Selecione o aluno e o tipo de declaração:</p>
+  <form method="POST" onsubmit="return confirmDeclaration();">
+    <div class="form-group">
+      <label for="rm">Aluno:</label>
+      <select class="form-control" id="rm" name="rm" required>
+        <option value="">Selecione</option>
+        {{ options_html|safe }}
+      </select>
+    </div>
+    <div class="form-group">
+      <label for="tipo">Tipo de Declaração:</label>
+      <select class="form-control" id="tipo" name="tipo" required>
+        <option value="">Selecione</option>
+        <option value="Escolaridade">Declaração de Escolaridade</option>
+        <option value="Transferencia">Declaração de Transferência</option>
+        <option value="Conclusão">Declaração de Conclusão</option>
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Gerar Declaração</button>
+  </form>
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<script src="https://code.jquery.com/jquery-3.5.1.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/select2/4.0.13/js/select2.min.js"></script>
+<script>
+  $(document).ready(function() {
+    $('#rm').select2({
+      placeholder: "Selecione o aluno",
+      allowClear: true
+    });
+  });
+  function confirmDeclaration() {
+    var tipo = document.getElementById('tipo').value;
+    if(tipo === "Transferencia") {
+      return confirm("Você está gerando uma declaração de transferência, essa é a declaração correta a ser gerada?");
+    }
+    return true;
+  }
+</script>
+{% endblock %}

@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Quadro de Transferências - E.M José Padin Mouta{% endblock %}
+{% block content %}
+<div class="container-form">
+  <h1>Quadro de Transferências</h1>
+  <form method="POST" enctype="multipart/form-data">
+    <div class="form-group">
+      <label for="period_start">Data Inicial da Semana:</label>
+      <input type="date" class="form-control" name="period_start" id="period_start" required>
+    </div>
+    <div class="form-group">
+      <label for="period_end">Data Final da Semana:</label>
+      <input type="date" class="form-control" name="period_end" id="period_end" required>
+    </div>
+    <div class="form-group">
+      <label for="responsavel">Responsável pelas Informações:</label>
+      <input type="text" class="form-control" name="responsavel" id="responsavel" required>
+    </div>
+    <div class="form-group">
+      <label for="lista_fundamental">Lista Piloto - FUNDAMENTAL (Excel):</label>
+      <input type="file" class="form-control-file" name="lista_fundamental" id="lista_fundamental" accept=".xlsx, .xls">
+    </div>
+    <div class="form-group">
+      <label for="lista_eja">Lista Piloto - EJA (Excel):</label>
+      <input type="file" class="form-control-file" name="lista_eja" id="lista_eja" accept=".xlsx, .xls">
+    </div>
+    <button type="submit" class="btn btn-primary">Gerar Quadro de Transferências</button>
+  </form>
+  <br>
+  <a href="{{ url_for('quadros') }}">Voltar para Quadros</a>
+</div>
+{% endblock %}

@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Selecionar Tipo de Declaração Escolar{% endblock %}
+{% block content %}
+<div class="container-form">
+  <h1>Selecionar Tipo de Declaração Escolar</h1>
+  <form method="POST">
+    <div class="form-group">
+      <label for="tipo">Selecione o tipo:</label>
+      <select class="form-control" id="tipo" name="tipo" required>
+        <option value="">Selecione</option>
+        <option value="Fundamental">Declaração Fundamental</option>
+        <option value="EJA">Declaração EJA</option>
+      </select>
+    </div>
+    <button type="submit" class="btn btn-primary">Continuar</button>
+  </form>
+</div>
+{% endblock %}

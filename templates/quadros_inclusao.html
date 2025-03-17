@@ -1,0 +1,20 @@
+{% extends "base.html" %}
+{% block title %}Quadro de Inclusão{% endblock %}
+{% block content %}
+<div class="container-form">
+  <h1>Quadro de Inclusão</h1>
+  <form method="POST" enctype="multipart/form-data">
+    <div class="form-group">
+      <label for="lista_fundamental">Lista Piloto - FUNDAMENTAL (Excel):</label>
+      <input type="file" name="lista_fundamental" id="lista_fundamental" class="form-control-file" accept=".xlsx, .xls">
+    </div>
+    <div class="form-group">
+      <label for="lista_eja">Lista Piloto - EJA (Excel):</label>
+      <input type="file" name="lista_eja" id="lista_eja" class="form-control-file" accept=".xlsx, .xls">
+    </div>
+    <button type="submit" class="btn btn-primary">Gerar Quadro de Inclusão</button>
+  </form>
+  <br>
+  <a href="{{ url_for('quadros') }}">Voltar para Quadros</a>
+</div>
+{% endblock %}

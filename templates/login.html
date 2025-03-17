@@ -1,0 +1,16 @@
+{% extends "base.html" %}
+{% block title %}Login - Acesso Restrito{% endblock %}
+{% block content %}
+<div class="container-login">
+  <h2>Acesso Restrito</h2>
+  <form method="POST">
+    <div class="form-group">
+      <input type="password" name="token" class="form-control" placeholder="Digite o token de acesso" required>
+    </div>
+    <button type="submit" class="btn btn-primary btn-block">Entrar</button>
+  </form>
+  {% if error %}
+    <p class="error">{{ error }}</p>
+  {% endif %}
+</div>
+{% endblock %}

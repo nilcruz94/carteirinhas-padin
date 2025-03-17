@@ -1,0 +1,21 @@
+{% extends "base.html" %}
+{% block title %}Quadros - E.M José Padin Mouta{% endblock %}
+{% block content %}
+<div class="container-menu">
+  <div class="option-card" onclick='window.location.href="{{ url_for("quadros_inclusao") }}"'>
+    <h2>Inclusão</h2>
+    <p>Gerar quadro de inclusão.</p>
+  </div>
+  <div class="option-card" onclick='window.location.href="{{ url_for("quadro_atendimento_mensal") }}"'>
+    <h2>Atendimento Mensal</h2>
+    <p>Gerar quadro de atendimento mensal.</p>
+  </div>
+  <div class="option-card" onclick='window.location.href="{{ url_for("quadro_transferencias") }}"'>
+    <h2>Transferências</h2>
+    <p>Gerar quadro de transferências.</p>
+  </div>
+  <div class="option-card" onclick='window.location.href="{{ url_for("dashboard") }}"'>
+    <h2>Voltar ao Dashboard</h2>
+  </div>
+</div>
+{% endblock %}

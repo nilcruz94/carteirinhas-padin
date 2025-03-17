@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Upload de Listas Piloto{% endblock %}
+{% block content %}
+<div class="container-form">
+  <h1>Upload de Listas Piloto</h1>
+  <form method="POST" enctype="multipart/form-data">
+    <div class="form-group">
+      <label for="lista_fundamental">Lista Piloto - REGULAR - 2025:</label>
+      <input type="file" name="lista_fundamental" id="lista_fundamental" class="form-control-file" accept=".xlsx, .xls" required>
+    </div>
+    <div class="form-group">
+      <label for="lista_eja">Lista Piloto - EJA - 1º SEM - 2025:</label>
+      <input type="file" name="lista_eja" id="lista_eja" class="form-control-file" accept=".xlsx, .xls" required>
+    </div>
+    <button type="submit" class="btn btn-primary">Carregar Listas</button>
+  </form>
+</div>
+{% endblock %}

@@ -1,0 +1,14 @@
+{% extends "base.html" %}
+{% block title %}Declaração Escolar - Fundamental{% endblock %}
+{% block content %}
+<div class="container-form">
+  <h1>Declaração Escolar - Fundamental</h1>
+  <form method="POST" enctype="multipart/form-data">
+    <div class="form-group">
+      <label for="excel_file">Selecione a lista piloto do Fundamental:</label>
+      <input type="file" name="excel_file" id="excel_file" class="form-control-file" accept=".xlsx, .xls">
+    </div>
+    <button type="submit" class="btn btn-primary">Anexar Lista do Fundamental</button>
+  </form>
+</div>
+{% endblock %}

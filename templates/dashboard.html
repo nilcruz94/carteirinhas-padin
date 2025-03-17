@@ -1,0 +1,23 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<div class="container-dashboard">
+  <div class="option-card" onclick="window.location.href='{{ url_for('declaracao_tipo') }}'">
+    <h2>Declaração Escolar</h2>
+    <p>Gerar declaração escolar.</p>
+  </div>
+  <div class="option-card" onclick="window.location.href='{{ url_for('carteirinhas') }}'">
+    <h2>Carteirinhas</h2>
+    <p>Gerar carteirinhas para os alunos.</p>
+  </div>
+  <div class="option-card" onclick="window.location.href='{{ url_for('quadros') }}'">
+    <h2>Quadros</h2>
+    <p>Gerar quadros para os alunos.</p>
+  </div>
+  <div class="logout-container">
+    <a href="{{ url_for('logout_route') }}" class="btn-logout">
+      <i class="fas fa-sign-out-alt"></i> Logout
+    </a>
+  </div>
+</div>
+{% endblock %}

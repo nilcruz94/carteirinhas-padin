@@ -1,0 +1,19 @@
+{% extends "base.html" %}
+{% block title %}Carteirinhas - E.M José Padin Mouta{% endblock %}
+{% block content %}
+<div class="container-upload">
+  <h2>Envie a lista piloto (Excel)</h2>
+  <form method="POST" enctype="multipart/form-data" onsubmit="showLoading()">
+    <div class="form-group">
+      <label for="excel_file">Arquivo da lista FUNDAMENTAL (opcional):</label>
+      <input type="file" name="excel_file" id="excel_file" class="form-control-file" accept=".xlsx, .xls">
+    </div>
+    <button type="submit" class="btn btn-primary">Gerar Carteirinhas</button>
+  </form>
+  <hr>
+  <!-- Aqui inclua os formulários para upload de foto e múltiplas fotos -->
+</div>
+{% endblock %}
+{% block extra_scripts %}
+<!-- Scripts específicos para essa página, se necessário -->
+{% endblock %}
